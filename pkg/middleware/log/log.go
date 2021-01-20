@@ -23,46 +23,52 @@ type ctxObj struct {
 	parent *ctxObj
 }
 
-var AccessLogEncoderConfig = zapcore.EncoderConfig{
-	TimeKey:        "ts",
-	LevelKey:       zapcore.OmitKey,
-	NameKey:        "handler",
-	CallerKey:      zapcore.OmitKey,
-	FunctionKey:    zapcore.OmitKey,
-	MessageKey:     zapcore.OmitKey,
-	StacktraceKey:  zapcore.OmitKey,
-	LineEnding:     zapcore.DefaultLineEnding,
-	EncodeLevel:    zapcore.LowercaseLevelEncoder,
-	EncodeTime:     zapcore.RFC3339TimeEncoder,
-	EncodeDuration: zapcore.MillisDurationEncoder,
-	EncodeCaller:   zapcore.ShortCallerEncoder,
+// DefaultAccessLogEncoderConfig returns the default configuration for access logger encoder
+func DefaultAccessLogEncoderConfig() zapcore.EncoderConfig {
+	return zapcore.EncoderConfig{
+		TimeKey:        "ts",
+		LevelKey:       zapcore.OmitKey,
+		NameKey:        "handler",
+		CallerKey:      zapcore.OmitKey,
+		FunctionKey:    zapcore.OmitKey,
+		MessageKey:     zapcore.OmitKey,
+		StacktraceKey:  zapcore.OmitKey,
+		LineEnding:     zapcore.DefaultLineEnding,
+		EncodeLevel:    zapcore.LowercaseLevelEncoder,
+		EncodeTime:     zapcore.RFC3339TimeEncoder,
+		EncodeDuration: zapcore.MillisDurationEncoder,
+		EncodeCaller:   zapcore.ShortCallerEncoder,
+	}
 }
 
-var ServerLogEncoderConfig = zapcore.EncoderConfig{
-	TimeKey:        "ts",
-	LevelKey:       "level",
-	NameKey:        "handler",
-	CallerKey:      "caller",
-	FunctionKey:    zapcore.OmitKey,
-	MessageKey:     "msg",
-	StacktraceKey:  "trace",
-	LineEnding:     zapcore.DefaultLineEnding,
-	EncodeLevel:    zapcore.CapitalLevelEncoder,
-	EncodeTime:     zapcore.RFC3339TimeEncoder,
-	EncodeDuration: zapcore.MillisDurationEncoder,
-	EncodeCaller:   zapcore.ShortCallerEncoder,
+// DefaultServerLogEncoderConfig returns the default configuration for server logger encoder
+func DefaultServerLogEncoderConfig() zapcore.EncoderConfig {
+	return zapcore.EncoderConfig{
+		TimeKey:        "ts",
+		LevelKey:       "level",
+		NameKey:        "handler",
+		CallerKey:      "caller",
+		FunctionKey:    zapcore.OmitKey,
+		MessageKey:     "msg",
+		StacktraceKey:  "trace",
+		LineEnding:     zapcore.DefaultLineEnding,
+		EncodeLevel:    zapcore.CapitalLevelEncoder,
+		EncodeTime:     zapcore.RFC3339TimeEncoder,
+		EncodeDuration: zapcore.MillisDurationEncoder,
+		EncodeCaller:   zapcore.ShortCallerEncoder,
+	}
 }
 
 func Middleware(aw io.Writer, sw io.Writer, lvl zapcore.Level) func(http.Handler) http.Handler {
 	var (
 		ac = zapcore.NewCore(
-			zapcore.NewConsoleEncoder(AccessLogEncoderConfig),
+			zapcore.NewConsoleEncoder(DefaultAccessLogEncoderConfig()),
 			zapcore.AddSync(aw),
 			zapcore.InfoLevel,
 		)
 		al = zap.New(ac).Named("access")
 		sc = zapcore.NewCore(
-			zapcore.NewConsoleEncoder(ServerLogEncoderConfig),
+			zapcore.NewConsoleEncoder(DefaultServerLogEncoderConfig()),
 			zapcore.AddSync(sw),
 			lvl,
 		)
@@ -128,10 +134,13 @@ func Middleware(aw io.Writer, sw io.Writer, lvl zapcore.Level) func(http.Handler
 	}
 }
 
+// Log is the convenience wrapper around Middleware
 func Log(next http.Handler) http.Handler {
 	return Middleware(os.Stdout, os.Stderr, zapcore.InfoLevel)(next)
 }
 
+// Logger returns server logger associated with the request. If there's no logger associated with the request, returns
+// no-op logger.
 func Logger(rq *http.Request) *zap.Logger {
 	obj, ok := rq.Context().Value(ctxKey{}).(*ctxObj)
 	if !ok {
@@ -140,6 +149,7 @@ func Logger(rq *http.Request) *zap.Logger {
 	return obj.server
 }
 
+// With pushes the lest of fields into the context of both access and server loggers associated with the request.
 func With(rq *http.Request, fields ...zap.Field) {
 	obj, ok := rq.Context().Value(ctxKey{}).(*ctxObj)
 	if !ok {
@@ -149,6 +159,7 @@ func With(rq *http.Request, fields ...zap.Field) {
 	obj.server = obj.server.With(fields...)
 }
 
+// Named append name token to both server and access loggers associated with the request.
 func Named(rq *http.Request, s string) {
 	obj, _ := rq.Context().Value(ctxKey{}).(*ctxObj)
 	if obj == nil {
@@ -158,6 +169,7 @@ func Named(rq *http.Request, s string) {
 	obj.server = obj.server.Named(s)
 }
 
+// WithStatus pushes response status code into the access logger associated with the request.
 func WithStatus(rq *http.Request, status int) {
 	obj, ok := rq.Context().Value(ctxKey{}).(*ctxObj)
 	if !ok {
@@ -166,6 +178,7 @@ func WithStatus(rq *http.Request, status int) {
 	obj.access = obj.access.With(zap.Int("status", status))
 }
 
+// WithContentLength pushes response content length into the access logger associated with the request.
 func WithContentLength(rq *http.Request, n int) {
 	obj, ok := rq.Context().Value(ctxKey{}).(*ctxObj)
 	if !ok {
@@ -176,26 +189,32 @@ func WithContentLength(rq *http.Request, n int) {
 
 var nop = zap.NewNop()
 
+// Fatal emits fatal level message using server logger associated with the request.
 func Fatal(rq *http.Request, msg string, fields ...zap.Field) {
 	Logger(rq).Fatal(msg, fields...)
 }
 
+// Panic emits panic level message using server logger associated with the request.
 func Panic(rq *http.Request, msg string, fields ...zap.Field) {
 	Logger(rq).Panic(msg, fields...)
 }
 
+// Error emits error level message using server logger associated with the request.
 func Error(rq *http.Request, msg string, fields ...zap.Field) {
 	Logger(rq).Error(msg, fields...)
 }
 
+// Warn emits warn level message using server logger associated with the request.
 func Warn(rq *http.Request, msg string, fields ...zap.Field) {
 	Logger(rq).Warn(msg, fields...)
 }
 
+// Info emits info level message using server logger associated with the request.
 func Info(rq *http.Request, msg string, fields ...zap.Field) {
 	Logger(rq).Info(msg, fields...)
 }
 
+// Debug emits debug level message using server logger associated with the request.
 func Debug(rq *http.Request, msg string, fields ...zap.Field) {
 	Logger(rq).Debug(msg, fields...)
 }

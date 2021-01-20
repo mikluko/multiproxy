@@ -64,6 +64,7 @@ func (s *MITMHandler) httpError(rw http.ResponseWriter, code int) {
 	http.Error(rw, http.StatusText(code), code)
 }
 
+//goland:noinspection GoUnhandledErrorResult
 func (s *MITMHandler) ServeHTTP(rw http.ResponseWriter, rq *http.Request) {
 	s.once.Do(s.init)
 

@@ -49,7 +49,7 @@ func main() {
 	var (
 		err error
 		l   = zap.New(zapcore.NewCore(
-			zapcore.NewConsoleEncoder(log.ServerLogEncoderConfig),
+			zapcore.NewConsoleEncoder(log.DefaultServerLogEncoderConfig()),
 			zapcore.AddSync(serverw),
 			zapcore.InfoLevel,
 		)).Named("cli")
