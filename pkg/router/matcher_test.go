@@ -9,7 +9,7 @@ import (
 func TestMatcher(t *testing.T) {
 	t.Run("exact domain", func(t *testing.T) {
 		m := matcher{
-			tpl:      "example.com",
+			tpl: "example.com",
 		}
 		require.True(t, m.matches("example.com"))
 		require.False(t, m.matches("www.example.com"))
@@ -17,7 +17,7 @@ func TestMatcher(t *testing.T) {
 	})
 	t.Run("domain suffix", func(t *testing.T) {
 		m := matcher{
-			tpl:      ".example.com",
+			tpl: ".example.com",
 		}
 		require.True(t, m.matches("example.com"))
 		require.True(t, m.matches("www.example.com"))
@@ -25,7 +25,7 @@ func TestMatcher(t *testing.T) {
 	})
 	t.Run("ip address", func(t *testing.T) {
 		m := matcher{
-			tpl:      "127.0.0.1",
+			tpl: "127.0.0.1",
 		}
 		require.True(t, m.matches("127.0.0.1"))
 		require.False(t, m.matches("127.0.0.2"))

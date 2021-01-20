@@ -15,8 +15,8 @@ import (
 )
 
 var (
-	testServer      *httptest.Server
-	testTLSServer   *httptest.Server
+	testServer    *httptest.Server
+	testTLSServer *httptest.Server
 )
 
 func TestMain(m *testing.M) {

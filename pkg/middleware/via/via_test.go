@@ -14,7 +14,7 @@ import (
 func TestViaMiddleware(t *testing.T) {
 	ident := "some-hostname.local"
 	s := httptest.NewServer(via.Middleware(ident)(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
-		require.Equal(t, "1.1 example, 1.1 " + ident, r.Header.Get("via"))
+		require.Equal(t, "1.1 example, 1.1 "+ident, r.Header.Get("via"))
 		rw.WriteHeader(http.StatusNoContent)
 	})))
 	defer s.Close()
@@ -29,7 +29,7 @@ func TestViaMiddleware(t *testing.T) {
 func TestViaHostname(t *testing.T) {
 	hostname, _ := os.Hostname()
 	s := httptest.NewServer(via.Via(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
-		require.Equal(t, "1.1 " + hostname, r.Header.Get("via"))
+		require.Equal(t, "1.1 "+hostname, r.Header.Get("via"))
 		rw.WriteHeader(http.StatusNoContent)
 	})))
 	defer s.Close()

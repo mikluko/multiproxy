@@ -85,4 +85,3 @@ func TestHTTPHandler_ServeHTTP(t *testing.T) {
 		require.Len(t, strings.Split(strings.TrimSpace(buf.String()), "\n"), 2)
 	})
 }
-
