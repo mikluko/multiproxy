@@ -21,6 +21,9 @@ type ctxObj struct {
 	seq    uint64
 	uid    uuid.UUID
 	parent *ctxObj
+
+	status        int
+	contentLength int
 }
 
 // DefaultAccessLogEncoderConfig returns the default configuration for access logger encoder
@@ -59,6 +62,7 @@ func DefaultServerLogEncoderConfig() zapcore.EncoderConfig {
 	}
 }
 
+// Middleware is logging middleware constructor
 func Middleware(aw io.Writer, sw io.Writer, lvl zapcore.Level) func(http.Handler) http.Handler {
 	var (
 		ac = zapcore.NewCore(
@@ -169,13 +173,23 @@ func Named(rq *http.Request, s string) {
 	obj.server = obj.server.Named(s)
 }
 
-// WithStatus pushes response status code into the access logger associated with the request.
-func WithStatus(rq *http.Request, status int) {
+// WithStatusCode pushes response status code into the access logger associated with the request.
+func WithStatusCode(rq *http.Request, status int) {
 	obj, ok := rq.Context().Value(ctxKey{}).(*ctxObj)
 	if !ok {
 		return
 	}
+	obj.status = status
 	obj.access = obj.access.With(zap.Int("status", status))
+}
+
+// StatusCode returns status code previously pushed into the request context. Returns 0 if no status was pushed.
+func StatusCode(rq *http.Request) int {
+	obj, ok := rq.Context().Value(ctxKey{}).(*ctxObj)
+	if !ok {
+		return 0
+	}
+	return obj.status
 }
 
 // WithContentLength pushes response content length into the access logger associated with the request.
@@ -184,7 +198,18 @@ func WithContentLength(rq *http.Request, n int) {
 	if !ok {
 		return
 	}
+	obj.contentLength = n
 	obj.access = obj.access.With(zap.Int("content-length", n))
+}
+
+// ContentLength returns content length previously pushed into the request context. Returns 0 if no content length  was
+// pushed.
+func ContentLength(rq *http.Request) int {
+	obj, ok := rq.Context().Value(ctxKey{}).(*ctxObj)
+	if !ok {
+		return 0
+	}
+	return obj.contentLength
 }
 
 var nop = zap.NewNop()

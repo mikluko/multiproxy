@@ -22,6 +22,13 @@ func TestLog(t *testing.T) {
 		h      = alice.
 			New(
 				log.Middleware(&access, &server, zapcore.InfoLevel),
+				func(next http.Handler) http.Handler {
+					return http.HandlerFunc(func(rw http.ResponseWriter, rq *http.Request) {
+						next.ServeHTTP(rw, rq)
+						require.Equal(t, http.StatusOK, log.StatusCode(rq))
+						require.Equal(t, 100500, log.ContentLength(rq))
+					})
+				},
 			).
 			ThenFunc(
 				func(rw http.ResponseWriter, rq *http.Request) {
@@ -29,7 +36,7 @@ func TestLog(t *testing.T) {
 					log.With(rq, zap.String("common-field", "yes"))
 
 					log.WithContentLength(rq, 100500)
-					log.WithStatus(rq, http.StatusOK)
+					log.WithStatusCode(rq, http.StatusOK)
 
 					log.Error(rq, "error message")
 					log.Warn(rq, "warn message")
