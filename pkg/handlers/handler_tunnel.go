@@ -79,7 +79,7 @@ func (s *Tunnel) ServeHTTP(rw http.ResponseWriter, rq *http.Request) {
 
 	_, _ = fmt.Fprintf(bufrw, "HTTP/1.1 200 OK\r\n\r\n")
 	_ = bufrw.Flush()
-	log.WithStatus(rq, http.StatusOK)
+	log.WithStatusCode(rq, http.StatusOK)
 
 	wg := sync.WaitGroup{}
 	wg.Add(2)

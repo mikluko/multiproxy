@@ -100,7 +100,7 @@ func (s *HTTPHandler) ServeHTTP(rw http.ResponseWriter, rq *http.Request) {
 	if err != nil {
 		log.Debug(rq, "client response write failed", zap.Error(err))
 	}
-	log.WithStatus(rq, rs.StatusCode)
+	log.WithStatusCode(rq, rs.StatusCode)
 	log.WithContentLength(rq, int(n))
 
 	return

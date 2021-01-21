@@ -102,6 +102,7 @@ func (s *MITMHandler) ServeHTTP(rw http.ResponseWriter, rq *http.Request) {
 		Conn: conn,
 	}
 	defer func() {
+		log.WithStatusCode(rq, http.StatusOK)
 		log.WithContentLength(rq, mitmconn.bytesWritten)
 	}()
 
