@@ -202,7 +202,7 @@ func WithContentLength(rq *http.Request, n int) {
 	obj.access = obj.access.With(zap.Int("content-length", n))
 }
 
-// ContentLength returns content length previously pushed into the request context. Returns 0 if no content length  was
+// ContentLength returns content length previously pushed into the request context. Returns 0 if no content length was
 // pushed.
 func ContentLength(rq *http.Request) int {
 	obj, ok := rq.Context().Value(ctxKey{}).(*ctxObj)
@@ -210,6 +210,24 @@ func ContentLength(rq *http.Request) int {
 		return 0
 	}
 	return obj.contentLength
+}
+
+// UID returns request identifier from the request context. Returns zero UUID if not found in the context.
+func UID(rq *http.Request) uuid.UUID {
+	obj, ok := rq.Context().Value(ctxKey{}).(*ctxObj)
+	if !ok {
+		return uuid.UUID{}
+	}
+	return obj.uid
+}
+
+// Sequence returns request sequence from the request context. Returns 0 if not found in the context.
+func Sequence(rq *http.Request) uint64 {
+	obj, ok := rq.Context().Value(ctxKey{}).(*ctxObj)
+	if !ok {
+		return 0
+	}
+	return obj.seq
 }
 
 var nop = zap.NewNop()
