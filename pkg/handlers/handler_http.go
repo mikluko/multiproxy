@@ -1,21 +1,15 @@
 package handlers
 
 import (
-	"bufio"
 	"context"
 	"crypto/tls"
-	"errors"
-	"fmt"
 	"io"
-	"io/ioutil"
 	"net"
 	"net/http"
 	"net/http/httputil"
 	"runtime"
 	"sync"
 	"time"
-
-	"go.uber.org/zap"
 
 	"github.com/akabos/multiproxy/pkg/middleware/log"
 )
@@ -28,47 +22,16 @@ type HTTPHandler struct {
 	//
 	// If Transport is nil, DefaultTransport is used.
 	Transport http.RoundTripper
-}
 
-func (s *HTTPHandler) transport() http.RoundTripper {
-	if s.Transport != nil {
-		return s.Transport
-	}
-	return DefaultTransport
+	once  sync.Once
+	proxy *httputil.ReverseProxy
 }
 
 func (s *HTTPHandler) httpError(rw http.ResponseWriter, code int) {
 	http.Error(rw, http.StatusText(code), code)
 }
 
-var hopHeaders = []string{
-	"Connection",
-	"Keep-Alive",
-	"Proxy-Authenticate",
-	"Proxy-Authorization",
-	"Te",
-	"Trailer", // not Trailers, there's a typo in RFC; http://www.rfc-editor.org/errata_search.php?eid=4522
-	"Transfer-Encoding",
-	"Upgrade",
-	"Proxy-Connection", // non-standard but still sent by libcurl
-}
-
-// removeHopHeaders removes hop-by-hop headers defined in https://tools.ietf.org/html/rfc2616#section-13.5.1
-func (s *HTTPHandler) removeHopHeaders(rq *http.Request) *http.Request {
-	for _, name := range hopHeaders {
-		rq.Header.Del(name)
-	}
-	return rq
-}
-
-// removeConnectionHeaders removes headers listed in `Connection` header as defined in
-// https://tools.ietf.org/html/rfc2616#section-14.10
-func (s *HTTPHandler) removeConnectionHeaders(rq *http.Request) *http.Request {
-	for _, name := range rq.Header.Values("connection") {
-		rq.Header.Del(name)
-	}
-	return rq
-}
+type httpHandlerCtxKey struct {}
 
 func (s *HTTPHandler) ServeHTTP(rw http.ResponseWriter, rq *http.Request) {
 	if rq.URL.Host == "" {
@@ -80,73 +43,63 @@ func (s *HTTPHandler) ServeHTTP(rw http.ResponseWriter, rq *http.Request) {
 		return
 	}
 
-	rq = rq.Clone(rq.Context())
-	rq.RequestURI = ""
-	s.removeHopHeaders(rq)
-	s.removeConnectionHeaders(rq)
-
-	rs, err := s.transport().RoundTrip(rq)
-	if err != nil {
-		if errors.Is(err, context.DeadlineExceeded) {
-			s.httpError(rw, http.StatusGatewayTimeout)
-			return
+	s.once.Do(func() {
+		if s.Transport == nil {
+			s.Transport = DefaultTransport
 		}
-		s.httpError(rw, http.StatusBadGateway)
-		return
-	}
-	defer rs.Body.Close()
+		s.proxy = &httputil.ReverseProxy{
+			Transport: s.Transport,
+			Director:  s.director,
+			ModifyResponse: s.modifyResponse,
+			ErrorHandler: s.handleError,
+		}
+	})
 
-	n, err := s.writeResponse(rw, rs)
-	if err != nil {
-		log.Debug(rq, "client response write failed", zap.Error(err))
-	}
-	log.WithStatusCode(rq, rs.StatusCode)
-	log.WithContentLength(rq, int(n))
+	wg := sync.WaitGroup{}
+	ctx := context.WithValue(rq.Context(), httpHandlerCtxKey{}, &wg)
 
+	s.proxy.ServeHTTP(rw, rq.WithContext(ctx))
+
+	wg.Wait()
 	return
 }
 
-func (s *HTTPHandler) writeResponse(rw http.ResponseWriter, rs *http.Response) (int64, error) {
-	hj, ok := rw.(http.Hijacker)
-	if !ok {
-		return 0, errors.New("response writer must implement http.Hijacker")
-	}
-	conn, buf, err := hj.Hijack()
-	if err != nil {
-		return 0, fmt.Errorf("connection hijack failed: %w", err)
-	}
-	defer conn.Close()
-	defer buf.Flush()
-	if rs.ContentLength < 0 {
-		return s.writeResponseWriterChunked(buf, rs)
-	}
-	return s.writeResponseWriter(buf, rs)
+func (s *HTTPHandler) director(rq *http.Request) {
+	rq.RequestURI = ""
 }
 
-func (s *HTTPHandler) writeResponseWriter(w io.Writer, res *http.Response) (int64, error) {
-	return res.ContentLength, res.Write(w)
-}
+func (s *HTTPHandler) modifyResponse(rs *http.Response) error {
+	rq := rs.Request
 
-func (s *HTTPHandler) writeResponseWriterChunked(w io.Writer, rs *http.Response) (size int64, err error) {
-	var (
-		pr, pw = io.Pipe()
-		wg     = sync.WaitGroup{}
-	)
+	log.WithStatusCode(rq, rs.StatusCode)
+	if rs.ContentLength >= 0 {
+		log.WithContentLength(rq, int(rs.ContentLength))
+		return nil
+	}
+
+	wg := rq.Context().Value(httpHandlerCtxKey{}).(*sync.WaitGroup)
 	wg.Add(1)
 
-	go func() {
-		sc := bufio.NewScanner(pr)
-		for sc.Scan() && sc.Text() != "" {
-		}
-		size, _ = io.Copy(ioutil.Discard, httputil.NewChunkedReader(pr))
-		_, _ = io.Copy(ioutil.Discard, pr)
+	var r, w = io.Pipe()
+
+	go func(dst io.WriteCloser, src io.ReadCloser) {
+		length, _ := io.Copy(dst, src)
+		_ = src.Close()
+		_ = dst.Close()
+		log.WithContentLength(rq, int(length))
 		wg.Done()
-	}()
+	}(w, rs.Body)
 
-	err = rs.Write(io.MultiWriter(w, pw))
-	_, _ = pr.Close(), pw.Close()
-	wg.Wait()
+	rs.Body = r
+	return nil
+}
 
+func (s *HTTPHandler) handleError(rw http.ResponseWriter, rq *http.Request, err error) {
+	if _, ok := err.(*net.OpError); ok {
+		http.Error(rw, http.StatusText(http.StatusBadGateway), http.StatusBadGateway)
+		return
+	}
+	http.Error(rw, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 	return
 }
 
