@@ -60,7 +60,8 @@ func (s *Tunnel) ServeHTTP(rw http.ResponseWriter, rq *http.Request) {
 
 	u, err := s.dialContext(rq.Context(), "tcp", rq.RequestURI)
 	if err != nil {
-		if errors.Unwrap(err).Error() == "i/o timeout" {
+		werr := errors.Unwrap(err)
+		if werr != nil && werr.Error() == "i/o timeout" {
 			s.httpError(rw, http.StatusGatewayTimeout)
 		} else {
 			s.httpError(rw, http.StatusBadGateway)
