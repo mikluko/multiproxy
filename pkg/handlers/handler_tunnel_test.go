@@ -63,4 +63,17 @@ func TestTunnelProxy_ServeHTTP(t *testing.T) {
 		require.Equal(t, "Gateway Timeout", err.Error())
 	})
 
+	t.Run("no gateway timeout", func(t *testing.T) {
+		// make sure specified timeout applicable only to dial, not the whole connection life cycle
+		p := httptest.NewServer(&handlers.Tunnel{
+			DialTimeout: time.Millisecond * 200,
+		})
+		defer p.Close()
+		tr := testTransport(p.URL)
+
+		rq, _ := http.NewRequest(http.MethodGet, testTLSServer.URL+"/delay/1", nil)
+		rs, err := tr.RoundTrip(rq)
+		require.NoError(t, err)
+		require.Equal(t, http.StatusOK, rs.StatusCode)
+	})
 }
