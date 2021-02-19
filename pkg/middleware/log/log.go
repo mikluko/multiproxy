@@ -31,7 +31,7 @@ func DefaultAccessLogEncoderConfig() zapcore.EncoderConfig {
 	return zapcore.EncoderConfig{
 		TimeKey:        "ts",
 		LevelKey:       zapcore.OmitKey,
-		NameKey:        "handler",
+		NameKey:        "logger",
 		CallerKey:      zapcore.OmitKey,
 		FunctionKey:    zapcore.OmitKey,
 		MessageKey:     zapcore.OmitKey,
@@ -49,13 +49,13 @@ func DefaultServerLogEncoderConfig() zapcore.EncoderConfig {
 	return zapcore.EncoderConfig{
 		TimeKey:        "ts",
 		LevelKey:       "level",
-		NameKey:        "handler",
+		NameKey:        "logger",
 		CallerKey:      "caller",
 		FunctionKey:    zapcore.OmitKey,
 		MessageKey:     "msg",
 		StacktraceKey:  "trace",
 		LineEnding:     zapcore.DefaultLineEnding,
-		EncodeLevel:    zapcore.CapitalLevelEncoder,
+		EncodeLevel:    zapcore.LowercaseLevelEncoder,
 		EncodeTime:     zapcore.RFC3339TimeEncoder,
 		EncodeDuration: zapcore.MillisDurationEncoder,
 		EncodeCaller:   zapcore.ShortCallerEncoder,
@@ -66,13 +66,13 @@ func DefaultServerLogEncoderConfig() zapcore.EncoderConfig {
 func Middleware(aw io.Writer, sw io.Writer, lvl zapcore.Level) func(http.Handler) http.Handler {
 	var (
 		ac = zapcore.NewCore(
-			zapcore.NewConsoleEncoder(DefaultAccessLogEncoderConfig()),
+			zapcore.NewJSONEncoder(DefaultAccessLogEncoderConfig()),
 			zapcore.AddSync(aw),
 			zapcore.InfoLevel,
 		)
 		al = zap.New(ac).Named("access")
 		sc = zapcore.NewCore(
-			zapcore.NewConsoleEncoder(DefaultServerLogEncoderConfig()),
+			zapcore.NewJSONEncoder(DefaultServerLogEncoderConfig()),
 			zapcore.AddSync(sw),
 			lvl,
 		)
