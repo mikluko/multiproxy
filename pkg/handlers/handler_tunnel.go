@@ -39,19 +39,20 @@ func (s *Tunnel) init() {
 	}
 }
 
-func (s *Tunnel) httpError(rw http.ResponseWriter, code int) {
+func (s *Tunnel) httpError(rw http.ResponseWriter, rq *http.Request, code int) {
+	log.WithStatusCode(rq, code)
 	http.Error(rw, http.StatusText(code), code)
 }
 
 func (s *Tunnel) ServeHTTP(rw http.ResponseWriter, rq *http.Request) {
 	if rq.Method != http.MethodConnect {
-		s.httpError(rw, http.StatusMethodNotAllowed)
+		s.httpError(rw, rq, http.StatusMethodNotAllowed)
 		return
 	}
 
 	hj, ok := rw.(http.Hijacker)
 	if !ok {
-		s.httpError(rw, http.StatusInternalServerError)
+		s.httpError(rw, rq, http.StatusInternalServerError)
 		log.Panic(rq, "underlying http.ResponseWriter MUST implement http.Hijacker")
 		return
 	}
@@ -62,9 +63,9 @@ func (s *Tunnel) ServeHTTP(rw http.ResponseWriter, rq *http.Request) {
 	if err != nil {
 		werr := errors.Unwrap(err)
 		if werr != nil && werr.Error() == "i/o timeout" {
-			s.httpError(rw, http.StatusGatewayTimeout)
+			s.httpError(rw, rq, http.StatusGatewayTimeout)
 		} else {
-			s.httpError(rw, http.StatusBadGateway)
+			s.httpError(rw, rq, http.StatusBadGateway)
 		}
 		return
 	}
@@ -72,7 +73,7 @@ func (s *Tunnel) ServeHTTP(rw http.ResponseWriter, rq *http.Request) {
 
 	conn, bufrw, err := hj.Hijack() // client connection and buffered read-writer
 	if err != nil {
-		s.httpError(rw, http.StatusInternalServerError)
+		s.httpError(rw, rq, http.StatusInternalServerError)
 		log.Warn(rq, "failed to hijack client connection", zap.Error(err))
 		return
 	}
