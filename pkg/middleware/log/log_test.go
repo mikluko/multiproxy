@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/justinas/alice"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
@@ -52,20 +53,21 @@ func TestLog(t *testing.T) {
 	_, err = http.Get(s.URL)
 	require.NoError(t, err)
 
-	require.Contains(t, access.String(), "\taccess.test\t")
-	require.NotContains(t, access.String(), "\tINFO\t")
-	require.Contains(t, access.String(), `"url": "/"`)
-	require.Contains(t, access.String(), `"status": 200`)
-	require.Contains(t, access.String(), `"content-length": 100500`)
-	require.Contains(t, access.String(), `"common-field": "yes"`)
+	assert.Contains(t, access.String(), `"logger":"access.test"`)
+	assert.NotContains(t, access.String(), `"info""`)
+	assert.NotContains(t, access.String(), `"INFO""`)
+	assert.Contains(t, access.String(), `"url":"/"`)
+	assert.Contains(t, access.String(), `"status":200`)
+	assert.Contains(t, access.String(), `"content-length":100500`)
+	assert.Contains(t, access.String(), `"common-field":"yes"`)
 
-	require.Contains(t, server.String(), "\tserver.test\t")
-	require.Contains(t, server.String(), "\terror message\t")
-	require.Contains(t, server.String(), "\twarn message\t")
-	require.Contains(t, server.String(), "\tinfo message\t")
-	require.NotContains(t, server.String(), "\tdebug message\t")
-	require.Contains(t, server.String(), `"common-field": "yes"`)
-	require.NotContains(t, server.String(), `"status": 200`)
+	assert.Contains(t, server.String(), `"logger":"server.test"`)
+	assert.Contains(t, server.String(), `"msg":"error message"`)
+	assert.Contains(t, server.String(), `"msg":"warn message"`)
+	assert.Contains(t, server.String(), `"msg":"info message"`)
+	assert.NotContains(t, server.String(), `"msg":"debug message"`)
+	assert.Contains(t, server.String(), `"common-field":"yes"`)
+	assert.NotContains(t, server.String(), `"status":200`)
 
 	access.Reset()
 	server.Reset()
@@ -73,8 +75,8 @@ func TestLog(t *testing.T) {
 	_, err = http.Get(s.URL)
 	require.NoError(t, err)
 
-	require.Contains(t, access.String(), "\taccess.test\t")
-	require.Contains(t, server.String(), "\tserver.test\t")
+	assert.Contains(t, access.String(), `"logger":"access.test"`)
+	assert.Contains(t, server.String(), `"logger":"server.test"`)
 }
 
 func TestLogNested(t *testing.T) {
@@ -116,11 +118,11 @@ func TestLogNested(t *testing.T) {
 	_, err = http.Get(s.URL)
 	require.NoError(t, err)
 
-	require.Contains(t, outer.String(), "\tserver\t")
-	require.Contains(t, outer.String(), `"outer-only-field": "yes"`)
-	require.NotContains(t, outer.String(), `"inner-field": "yes"`)
+	assert.Contains(t, outer.String(), `"logger":"server"`)
+	assert.Contains(t, outer.String(), `"outer-only-field":"yes"`)
+	assert.NotContains(t, outer.String(), `"inner-field":"yes"`)
 
-	require.Contains(t, inner.String(), "\tserver.inner\t")
-	require.Contains(t, inner.String(), `"inner-field": "yes"`)
-	require.NotContains(t, inner.String(), `"outer-only-field": "yes"`)
+	assert.Contains(t, inner.String(), `"logger":"server.inner"`)
+	assert.Contains(t, inner.String(), `"inner-field":"yes"`)
+	assert.NotContains(t, inner.String(), `"outer-only-field":"yes"`)
 }
