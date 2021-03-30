@@ -1,11 +1,11 @@
 # multiproxy
 
+`multiproxy` is an extensible and performant HTTP proxy implemented in Go.
+
 [![Go Reference](https://pkg.go.dev/badge/github.com/akabos/multiproxy.svg)](https://pkg.go.dev/github.com/akabos/multiproxy)
 [![Go Report Card](https://goreportcard.com/badge/github.com/akabos/multiproxy)](https://goreportcard.com/report/github.com/akabos/multiproxy)
 [![Go Cover](https://gocover.io/_badge/github.com/akabos/multiproxy)](https://gocover.io/github.com/akabos/multiproxy)
 [![License](https://img.shields.io/github/license/akabos/multiproxy.svg)](https://github.com/akabos/multiproxy/blob/develop/LICENSE)
-
-`multiproxy` is an extensible and performant HTTP proxy implemented in Go.
 
 ## Requirements
 
