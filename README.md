@@ -1,6 +1,6 @@
 # multiproxy
 
-Extensible and performant HTTP roxy implemented in Go.
+`multiproxy` is an extensible and performant HTTP proxy implemented in Go.
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/akabos/multiproxy.svg)](https://pkg.go.dev/github.com/akabos/multiproxy)
 [![Go Report Card](https://goreportcard.com/badge/github.com/akabos/multiproxy)](https://goreportcard.com/report/github.com/akabos/multiproxy)
