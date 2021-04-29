@@ -17,7 +17,6 @@ import (
 	"github.com/akabos/multiproxy/pkg/handlers"
 	"github.com/akabos/multiproxy/pkg/middleware/log"
 	"github.com/akabos/multiproxy/pkg/middleware/via"
-	"github.com/akabos/multiproxy/pkg/middleware/xforwardedfor"
 	"github.com/akabos/multiproxy/pkg/router"
 )
 
@@ -68,16 +67,16 @@ func main() {
 	if !*optNoVia {
 		httpMiddleware = append(httpMiddleware, via.Via)
 	}
-	if !*optNoXForwardedFor {
-		httpMiddleware = append(httpMiddleware, xforwardedfor.XForwardedFor)
-	}
-
 	var mux = &router.Router{
-		Default: alice.New(httpMiddleware...).Then(&handlers.HTTPHandler{}),
+		Default: alice.New(httpMiddleware...).Then(&handlers.HTTPHandler{
+			NoXForwardedFor: *optNoXForwardedFor,
+		}),
 	}
 
 	var mitmHandler http.Handler = &handlers.MITMHandler{
-		Handler: alice.New(httpMiddleware...).Then(&handlers.HTTPHandler{}),
+		Handler: alice.New(httpMiddleware...).Then(&handlers.HTTPHandler{
+			NoXForwardedFor: *optNoXForwardedFor,
+		}),
 	}
 	var mitmMiddleware = []alice.Constructor{
 		lmw,

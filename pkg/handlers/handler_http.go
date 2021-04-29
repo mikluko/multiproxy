@@ -23,6 +23,9 @@ type HTTPHandler struct {
 	// If Transport is nil, DefaultTransport is used.
 	Transport http.RoundTripper
 
+	NoXForwardedFor bool
+	NoVia           bool
+
 	once  sync.Once
 	proxy *httputil.ReverseProxy
 }
@@ -66,6 +69,9 @@ func (s *HTTPHandler) ServeHTTP(rw http.ResponseWriter, rq *http.Request) {
 
 func (s *HTTPHandler) director(rq *http.Request) {
 	rq.RequestURI = ""
+	if s.NoXForwardedFor {
+		rq.Header["X-Forwarded-For"] = nil
+	}
 }
 
 func (s *HTTPHandler) modifyResponse(rs *http.Response) error {
