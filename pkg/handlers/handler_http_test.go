@@ -70,24 +70,7 @@ func TestHTTPHandler_ServeHTTP(t *testing.T) {
 		require.Equal(t, http.StatusBadRequest, rs.StatusCode)
 	})
 
-	t.Run("small chunked response", func(t *testing.T) {
-		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-		defer cancel()
-
-		rq, _ := http.NewRequest(http.MethodGet, testServer.URL+"/stream/2", nil)
-		rs, err := tr.RoundTrip(rq.WithContext(ctx))
-		require.NoError(t, err)
-		require.Equal(t, http.StatusOK, rs.StatusCode)
-		require.Len(t, rs.TransferEncoding, 0)
-		require.Greater(t, rs.ContentLength, int64(0))
-
-		buf := bytes.NewBuffer(nil)
-		_, err = io.Copy(buf, rs.Body)
-		require.NoError(t, err)
-		require.Len(t, strings.Split(strings.TrimSpace(buf.String()), "\n"), 2)
-	})
-
-	t.Run("large chunked response", func(t *testing.T) {
+	t.Run("chunked response", func(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
 
