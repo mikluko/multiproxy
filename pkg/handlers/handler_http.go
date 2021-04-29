@@ -23,8 +23,8 @@ type HTTPHandler struct {
 	// If Transport is nil, DefaultTransport is used.
 	Transport http.RoundTripper
 
+	// Instruct httputil.ReverseProxy to skip the addition of X-Forwarded-For header
 	NoXForwardedFor bool
-	NoVia           bool
 
 	once  sync.Once
 	proxy *httputil.ReverseProxy
