@@ -129,3 +129,39 @@ func TestRouter_ServeHTTP(t *testing.T) {
 		require.Equal(t, "custom", data.Headers.Get("x-test-route"))
 	})
 }
+
+func TestRouter_ServeHTTP_hostRules(t *testing.T) {
+	ok := http.HandlerFunc(func(rw http.ResponseWriter, _ *http.Request) { rw.WriteHeader(http.StatusNoContent) })
+
+	serve := func(r *router2.Router, method, target string) int {
+		rq := httptest.NewRequest(method, target, nil)
+		rw := httptest.NewRecorder()
+		r.ServeHTTP(rw, rq)
+		return rw.Code
+	}
+
+	t.Run("no rules refuse every host", func(t *testing.T) {
+		r := &router2.Router{Default: ok}
+		require.Equal(t, http.StatusForbidden, serve(r, http.MethodGet, "http://example.com/"))
+		require.Equal(t, http.StatusMethodNotAllowed, serve(r, http.MethodConnect, "example.com:443"))
+	})
+	t.Run("a host pattern admits plain HTTP to that host only", func(t *testing.T) {
+		r := &router2.Router{Default: ok}
+		r.HandleConnectHost(".example.com", ok)
+		require.Equal(t, http.StatusNoContent, serve(r, http.MethodGet, "http://www.example.com/"))
+		require.Equal(t, http.StatusNoContent, serve(r, http.MethodGet, "http://example.com:8080/"))
+		require.Equal(t, http.StatusForbidden, serve(r, http.MethodGet, "http://anything.test/"))
+	})
+	t.Run("a fallback admits every host", func(t *testing.T) {
+		r := &router2.Router{Default: ok, Connect: ok}
+		require.Equal(t, http.StatusNoContent, serve(r, http.MethodGet, "http://anything.test/"))
+	})
+	t.Run("origin-form requests are not proxied", func(t *testing.T) {
+		r := &router2.Router{Default: ok, Connect: ok}
+		rq := httptest.NewRequest(http.MethodGet, "/", nil)
+		rq.URL.Host = ""
+		rw := httptest.NewRecorder()
+		r.ServeHTTP(rw, rq)
+		require.Equal(t, http.StatusNotFound, rw.Code)
+	})
+}

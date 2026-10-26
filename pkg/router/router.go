@@ -11,6 +11,9 @@ import (
 // any requests to upstream or target servers though.
 type Router struct {
 	// Default specifies handler to serve non-CONNECT proxy requests. If not set, NotFound will be used.
+	//
+	// A non-CONNECT request reaches Default only where a CONNECT host pattern matches its host or Connect is set;
+	// any other is answered by Forbidden.
 	Default http.Handler
 
 	// Connect sets fallback CONNECT handler which will be used if no host matches. If no fallback handler specified,
@@ -20,12 +23,14 @@ type Router struct {
 	// NotFound sets handler to serve non-proxy requests. If not set, http.NotFound will be used.
 	NotFound http.Handler
 
-	matchers []matcher
+	matchers    []matcher
+	hasFallback bool
 
 	once sync.Once
 }
 
 func (r *Router) init() {
+	r.hasFallback = r.Connect != nil
 	if r.Default == nil {
 		r.Default = NotFound
 	}
@@ -64,21 +69,34 @@ func (r *Router) ServeHTTP(rw http.ResponseWriter, rq *http.Request) {
 	switch {
 	case rq.Method == http.MethodConnect:
 		h = r.Connect
-		if r.matchers != nil {
-			for i := range r.matchers {
-				if r.matchers[i].matches(rq.URL.Hostname()) {
-					h = r.matchers[i].handler
-					break
-				}
-			}
+		if m := r.match(rq.URL.Hostname()); m != nil {
+			h = m
 		}
 	case rq.URL.Host != "":
-		h = r.Default
+		h = Forbidden
+		if r.hasFallback || r.match(rq.URL.Hostname()) != nil {
+			h = r.Default
+		}
 	default:
 		h = r.NotFound
 	}
 	h.ServeHTTP(rw, rq)
 }
+
+// match returns the handler of the first host pattern matching hostname, or nil.
+func (r *Router) match(hostname string) http.Handler {
+	for i := range r.matchers {
+		if r.matchers[i].matches(hostname) {
+			return r.matchers[i].handler
+		}
+	}
+	return nil
+}
+
+// Forbidden is the handler which returns 403 for any request
+var Forbidden = http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	http.Error(w, http.StatusText(http.StatusForbidden), http.StatusForbidden)
+})
 
 // NotFound is the handler which returns 404 for any request
 var NotFound = http.HandlerFunc(http.NotFound)

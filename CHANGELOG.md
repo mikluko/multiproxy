@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Breaking:** the module path is `sarak.sh/mikluko/multiproxy`; imports of `github.com/akabos/multiproxy` change to it.
 - **Breaking:** building requires Go 1.26 or later.
+- **Breaking:** `router.Router` answers a plain-HTTP request with 403 unless a host pattern matches its host or `Connect` is set, so `-mitm` and `-tunnel` restrict plain HTTP as well as `CONNECT`.
 
 ### Removed
 
