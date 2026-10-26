@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `-leaf-key` selects RSA or ECDSA P-256 keys for MITM certificates, and `SelfSignedCA.KeyAlgorithm` does the same in the library.
+- `-leaf-validity` and `SelfSignedCA.Validity` set how long MITM certificates stay valid.
+
 ### Changed
 
 - **Breaking:** the module path is `sarak.sh/mikluko/multiproxy`; imports of `github.com/akabos/multiproxy` change to it.
@@ -19,6 +24,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - MITM certificates name the requested hostname as a subject alternative name, so Go clients accept them.
+- MITM certificate keys honour `SelfSignedCA.BitSize`, which defaults to 2048 bits instead of 1024.
+- MITM certificates are valid for 30 days by default instead of 10 years, and are issued again once expired.
+- MITM certificates carry random serial numbers instead of all sharing serial 1.
 
 ## [0.3.1] - 2021-04-29
 
