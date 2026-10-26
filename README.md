@@ -19,10 +19,6 @@
 
     multiproxy 
 
-Running [pre-built docker image](https://hub.docker.com/r/akabos/multiproxy):
-
-    docker run -rm -p 8080:8080 akabos/multiproxy
-
 Making a request over the proxy:
 
     curl -x http://127.0.0.1:8080 http://example.com
