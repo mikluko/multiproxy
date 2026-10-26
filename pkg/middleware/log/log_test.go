@@ -2,7 +2,8 @@ package log_test
 
 import (
 	"bytes"
-	"io/ioutil"
+	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -10,11 +11,13 @@ import (
 	"github.com/justinas/alice"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
 
 	"sarak.sh/mikluko/multiproxy/pkg/middleware/log"
 )
+
+func jsonLogger(w io.Writer) *slog.Logger {
+	return slog.New(slog.NewJSONHandler(w, nil))
+}
 
 func TestLog(t *testing.T) {
 	var (
@@ -22,7 +25,7 @@ func TestLog(t *testing.T) {
 		server bytes.Buffer
 		h      = alice.
 			New(
-				log.Middleware(&access, &server, zapcore.InfoLevel),
+				log.Middleware(jsonLogger(&access), jsonLogger(&server)),
 				func(next http.Handler) http.Handler {
 					return http.HandlerFunc(func(rw http.ResponseWriter, rq *http.Request) {
 						next.ServeHTTP(rw, rq)
@@ -34,7 +37,7 @@ func TestLog(t *testing.T) {
 			ThenFunc(
 				func(rw http.ResponseWriter, rq *http.Request) {
 					log.Named(rq, "test")
-					log.With(rq, zap.String("common-field", "yes"))
+					log.With(rq, "common-field", "yes")
 
 					log.WithContentLength(rq, 100500)
 					log.WithStatusCode(rq, http.StatusOK)
@@ -45,21 +48,20 @@ func TestLog(t *testing.T) {
 					log.Debug(rq, "debug message")
 				},
 			)
-		err error
 	)
 	s := httptest.NewServer(h)
 	defer s.Close()
 
-	_, err = http.Get(s.URL)
+	rs, err := http.Get(s.URL)
 	require.NoError(t, err)
+	_ = rs.Body.Close()
 
 	assert.Contains(t, access.String(), `"logger":"access.test"`)
-	assert.NotContains(t, access.String(), `"info""`)
-	assert.NotContains(t, access.String(), `"INFO""`)
 	assert.Contains(t, access.String(), `"url":"/"`)
 	assert.Contains(t, access.String(), `"status":200`)
 	assert.Contains(t, access.String(), `"content-length":100500`)
 	assert.Contains(t, access.String(), `"common-field":"yes"`)
+	assert.Contains(t, access.String(), `"duration"`)
 
 	assert.Contains(t, server.String(), `"logger":"server.test"`)
 	assert.Contains(t, server.String(), `"msg":"error message"`)
@@ -72,8 +74,9 @@ func TestLog(t *testing.T) {
 	access.Reset()
 	server.Reset()
 
-	_, err = http.Get(s.URL)
+	rs, err = http.Get(s.URL)
 	require.NoError(t, err)
+	_ = rs.Body.Close()
 
 	assert.Contains(t, access.String(), `"logger":"access.test"`)
 	assert.Contains(t, server.String(), `"logger":"server.test"`)
@@ -85,38 +88,30 @@ func TestLogNested(t *testing.T) {
 		inner bytes.Buffer
 		h     = alice.
 			New(
-				log.Middleware(
-					ioutil.Discard,
-					&outer,
-					zapcore.InfoLevel,
-				),
+				log.Middleware(jsonLogger(io.Discard), jsonLogger(&outer)),
 				func(next http.Handler) http.Handler {
 					return http.HandlerFunc(func(rw http.ResponseWriter, rq *http.Request) {
 						next.ServeHTTP(rw, rq)
-						log.With(rq, zap.String("outer-only-field", "yes"))
+						log.With(rq, "outer-only-field", "yes")
 						log.Info(rq, "")
 					})
 				},
-				log.Middleware(
-					ioutil.Discard,
-					&inner,
-					zapcore.InfoLevel,
-				),
+				log.Middleware(jsonLogger(io.Discard), jsonLogger(&inner)),
 			).
 			ThenFunc(
 				func(rw http.ResponseWriter, rq *http.Request) {
 					log.Named(rq, "inner")
-					log.With(rq, zap.String("inner-field", "yes"))
+					log.With(rq, "inner-field", "yes")
 					log.Info(rq, "")
 				},
 			)
-		err error
 	)
 	s := httptest.NewServer(h)
 	defer s.Close()
 
-	_, err = http.Get(s.URL)
+	rs, err := http.Get(s.URL)
 	require.NoError(t, err)
+	_ = rs.Body.Close()
 
 	assert.Contains(t, outer.String(), `"logger":"server"`)
 	assert.Contains(t, outer.String(), `"outer-only-field":"yes"`)
@@ -124,5 +119,6 @@ func TestLogNested(t *testing.T) {
 
 	assert.Contains(t, inner.String(), `"logger":"server.inner"`)
 	assert.Contains(t, inner.String(), `"inner-field":"yes"`)
+	assert.Contains(t, inner.String(), `"parent-seq"`)
 	assert.NotContains(t, inner.String(), `"outer-only-field":"yes"`)
 }

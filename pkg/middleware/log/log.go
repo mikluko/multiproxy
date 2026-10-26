@@ -1,23 +1,23 @@
+// Package log carries an access logger and a server logger in the context of each proxied request.
 package log
 
 import (
 	"context"
-	"io"
+	"log/slog"
 	"net/http"
 	"os"
 	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
-	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
 )
 
 type ctxKey struct{}
 
 type ctxObj struct {
-	access *zap.Logger
-	server *zap.Logger
+	access *slog.Logger
+	server *slog.Logger
+	name   string
 	seq    uint64
 	uid    uuid.UUID
 	parent *ctxObj
@@ -26,238 +26,170 @@ type ctxObj struct {
 	contentLength int
 }
 
-// DefaultAccessLogEncoderConfig returns the default configuration for access logger encoder
-func DefaultAccessLogEncoderConfig() zapcore.EncoderConfig {
-	return zapcore.EncoderConfig{
-		TimeKey:        "ts",
-		LevelKey:       zapcore.OmitKey,
-		NameKey:        "logger",
-		CallerKey:      zapcore.OmitKey,
-		FunctionKey:    zapcore.OmitKey,
-		MessageKey:     zapcore.OmitKey,
-		StacktraceKey:  zapcore.OmitKey,
-		LineEnding:     zapcore.DefaultLineEnding,
-		EncodeLevel:    zapcore.LowercaseLevelEncoder,
-		EncodeTime:     zapcore.RFC3339TimeEncoder,
-		EncodeDuration: zapcore.MillisDurationEncoder,
-		EncodeCaller:   zapcore.ShortCallerEncoder,
-	}
-}
-
-// DefaultServerLogEncoderConfig returns the default configuration for server logger encoder
-func DefaultServerLogEncoderConfig() zapcore.EncoderConfig {
-	return zapcore.EncoderConfig{
-		TimeKey:        "ts",
-		LevelKey:       "level",
-		NameKey:        "logger",
-		CallerKey:      "caller",
-		FunctionKey:    zapcore.OmitKey,
-		MessageKey:     "msg",
-		StacktraceKey:  "trace",
-		LineEnding:     zapcore.DefaultLineEnding,
-		EncodeLevel:    zapcore.LowercaseLevelEncoder,
-		EncodeTime:     zapcore.RFC3339TimeEncoder,
-		EncodeDuration: zapcore.MillisDurationEncoder,
-		EncodeCaller:   zapcore.ShortCallerEncoder,
-	}
-}
-
-// Middleware is logging middleware constructor
-func Middleware(aw io.Writer, sw io.Writer, lvl zapcore.Level) func(http.Handler) http.Handler {
-	var (
-		ac = zapcore.NewCore(
-			zapcore.NewJSONEncoder(DefaultAccessLogEncoderConfig()),
-			zapcore.AddSync(aw),
-			zapcore.InfoLevel,
-		)
-		al = zap.New(ac).Named("access")
-		sc = zapcore.NewCore(
-			zapcore.NewJSONEncoder(DefaultServerLogEncoderConfig()),
-			zapcore.AddSync(sw),
-			lvl,
-		)
-		sl  = zap.New(sc).Named("server")
-		seq uint64
-	)
+// Middleware gives each request an access logger derived from access and a server logger derived from server, and
+// writes one access record through the former when the request completes. A request served inside another, as one
+// intercepted from a CONNECT session, records the sequence and identifier of the request it is served in.
+//
+// Every record is written with the request's context.
+func Middleware(access, server *slog.Logger) func(http.Handler) http.Handler {
+	var seq uint64
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(rw http.ResponseWriter, rq *http.Request) {
 			t := time.Now()
-			obj, hasParent := rq.Context().Value(ctxKey{}).(*ctxObj)
-			if !hasParent {
-				obj = &ctxObj{
-					access: al,
-					server: sl,
-					seq:    atomic.AddUint64(&seq, 1),
-					uid:    uuid.New(),
-				}
-			} else {
-				obj = &ctxObj{
-					access: obj.access.WithOptions(zap.WrapCore(func(_ zapcore.Core) zapcore.Core {
-						return ac
-					})),
-					server: obj.server.WithOptions(zap.WrapCore(func(_ zapcore.Core) zapcore.Core {
-						return sc
-					})),
-					seq:    atomic.AddUint64(&seq, 1),
-					uid:    uuid.New(),
-					parent: obj,
-				}
+			parent, _ := rq.Context().Value(ctxKey{}).(*ctxObj)
+			obj := &ctxObj{
+				seq:    atomic.AddUint64(&seq, 1),
+				uid:    uuid.New(),
+				parent: parent,
 			}
-			obj.server = obj.server.With(
-				zap.Uint64("seq", obj.seq),
-				zap.String("uid", obj.uid.String()),
-			)
-			obj.access = obj.access.With(
-				zap.Uint64("seq", obj.seq),
-				zap.String("uid", obj.uid.String()),
-				zap.String("client", rq.RemoteAddr),
-				zap.String("method", rq.Method),
-			)
+			ids := []any{"seq", obj.seq, "uid", obj.uid.String()}
+			if parent != nil {
+				obj.name = parent.name
+				ids = append(ids, "parent-seq", parent.seq, "parent-uuid", parent.uid.String())
+			}
+			obj.server = server.With(ids...)
+			obj.access = access.With(append(ids, "client", rq.RemoteAddr, "method", rq.Method)...)
 			if rq.Method == http.MethodConnect {
-				obj.access = obj.access.With(zap.String("server", rq.URL.Host))
+				obj.access = obj.access.With("server", rq.URL.Host)
 			} else {
-				obj.access = obj.access.With(zap.String("url", rq.URL.String()))
+				obj.access = obj.access.With("url", rq.URL.String())
 			}
-			if hasParent {
-				obj.access = obj.access.With(
-					zap.Uint64("parent-seq", obj.parent.seq),
-					zap.String("parent-uuid", obj.parent.uid.String()),
-				)
-				obj.server = obj.server.With(
-					zap.Uint64("parent-seq", obj.parent.seq),
-					zap.String("parent-uuid", obj.parent.uid.String()),
-				)
-			}
+
 			ctx := context.WithValue(rq.Context(), ctxKey{}, obj)
 			next.ServeHTTP(rw, rq.WithContext(ctx))
-			obj.access.Info("",
-				zap.Duration("duration", time.Since(t)),
-				zap.Stringer("duration-human", time.Since(t).Round(time.Millisecond)),
+
+			d := time.Since(t)
+			obj.access.LogAttrs(ctx, slog.LevelInfo, "",
+				slog.String("logger", "access"+obj.name),
+				slog.Duration("duration", d),
+				slog.String("duration-human", d.Round(time.Millisecond).String()),
 			)
 		})
 	}
 }
 
-// Log is the convenience wrapper around Middleware
+// Log is Middleware writing JSON access records to stdout and JSON server records to stderr.
 func Log(next http.Handler) http.Handler {
-	return Middleware(os.Stdout, os.Stderr, zapcore.InfoLevel)(next)
+	return Middleware(
+		slog.New(slog.NewJSONHandler(os.Stdout, nil)),
+		slog.New(slog.NewJSONHandler(os.Stderr, nil)),
+	)(next)
 }
 
-// Logger returns server logger associated with the request. If there's no logger associated with the request, returns
-// no-op logger.
-func Logger(rq *http.Request) *zap.Logger {
-	obj, ok := rq.Context().Value(ctxKey{}).(*ctxObj)
-	if !ok {
+func fromRequest(rq *http.Request) *ctxObj {
+	obj, _ := rq.Context().Value(ctxKey{}).(*ctxObj)
+	return obj
+}
+
+// Logger returns the server logger of the request, or a logger that discards everything where the request carries
+// none.
+func Logger(rq *http.Request) *slog.Logger {
+	obj := fromRequest(rq)
+	if obj == nil {
 		return nop
 	}
-	return obj.server
+	return obj.server.With("logger", "server"+obj.name)
 }
 
-// With pushes the lest of fields into the context of both access and server loggers associated with the request.
-func With(rq *http.Request, fields ...zap.Field) {
-	obj, ok := rq.Context().Value(ctxKey{}).(*ctxObj)
-	if !ok {
-		return
-	}
-	obj.access = obj.access.With(fields...)
-	obj.server = obj.server.With(fields...)
-}
+var nop = slog.New(slog.DiscardHandler)
 
-// Named append name token to both server and access loggers associated with the request.
-func Named(rq *http.Request, s string) {
-	obj, _ := rq.Context().Value(ctxKey{}).(*ctxObj)
+// With adds attributes, as slog.Logger.With takes them, to both loggers of the request.
+func With(rq *http.Request, args ...any) {
+	obj := fromRequest(rq)
 	if obj == nil {
 		return
 	}
-	obj.access = obj.access.Named(s)
-	obj.server = obj.server.Named(s)
+	obj.access = obj.access.With(args...)
+	obj.server = obj.server.With(args...)
 }
 
-// WithStatusCode pushes response status code into the access logger associated with the request.
+// Named appends a dot and s to the logger name both loggers of the request record.
+func Named(rq *http.Request, s string) {
+	obj := fromRequest(rq)
+	if obj == nil {
+		return
+	}
+	obj.name += "." + s
+}
+
+// WithStatusCode records the response status code in the access logger of the request.
 func WithStatusCode(rq *http.Request, status int) {
-	obj, ok := rq.Context().Value(ctxKey{}).(*ctxObj)
-	if !ok {
+	obj := fromRequest(rq)
+	if obj == nil {
 		return
 	}
 	obj.status = status
-	obj.access = obj.access.With(zap.Int("status", status))
+	obj.access = obj.access.With("status", status)
 }
 
-// StatusCode returns status code previously pushed into the request context. Returns 0 if no status was pushed.
+// StatusCode returns the status code recorded by WithStatusCode, or 0.
 func StatusCode(rq *http.Request) int {
-	obj, ok := rq.Context().Value(ctxKey{}).(*ctxObj)
-	if !ok {
+	obj := fromRequest(rq)
+	if obj == nil {
 		return 0
 	}
 	return obj.status
 }
 
-// WithContentLength pushes response content length into the access logger associated with the request.
+// WithContentLength records the response content length in the access logger of the request.
 func WithContentLength(rq *http.Request, n int) {
-	obj, ok := rq.Context().Value(ctxKey{}).(*ctxObj)
-	if !ok {
+	obj := fromRequest(rq)
+	if obj == nil {
 		return
 	}
 	obj.contentLength = n
-	obj.access = obj.access.With(zap.Int("content-length", n))
+	obj.access = obj.access.With("content-length", n)
 }
 
-// ContentLength returns content length previously pushed into the request context. Returns 0 if no content length was
-// pushed.
+// ContentLength returns the content length recorded by WithContentLength, or 0.
 func ContentLength(rq *http.Request) int {
-	obj, ok := rq.Context().Value(ctxKey{}).(*ctxObj)
-	if !ok {
+	obj := fromRequest(rq)
+	if obj == nil {
 		return 0
 	}
 	return obj.contentLength
 }
 
-// UID returns request identifier from the request context. Returns zero UUID if not found in the context.
+// UID returns the identifier of the request, or the zero UUID where the request carries none.
 func UID(rq *http.Request) uuid.UUID {
-	obj, ok := rq.Context().Value(ctxKey{}).(*ctxObj)
-	if !ok {
+	obj := fromRequest(rq)
+	if obj == nil {
 		return uuid.UUID{}
 	}
 	return obj.uid
 }
 
-// Sequence returns request sequence from the request context. Returns 0 if not found in the context.
+// Sequence returns the sequence number of the request, or 0 where the request carries none.
 func Sequence(rq *http.Request) uint64 {
-	obj, ok := rq.Context().Value(ctxKey{}).(*ctxObj)
-	if !ok {
+	obj := fromRequest(rq)
+	if obj == nil {
 		return 0
 	}
 	return obj.seq
 }
 
-var nop = zap.NewNop()
-
-// Fatal emits fatal level message using server logger associated with the request.
-func Fatal(rq *http.Request, msg string, fields ...zap.Field) {
-	Logger(rq).Fatal(msg, fields...)
+// Panic writes msg at error level through the server logger of the request, then panics with msg.
+func Panic(rq *http.Request, msg string, args ...any) {
+	Logger(rq).ErrorContext(rq.Context(), msg, args...)
+	panic(msg)
 }
 
-// Panic emits panic level message using server logger associated with the request.
-func Panic(rq *http.Request, msg string, fields ...zap.Field) {
-	Logger(rq).Panic(msg, fields...)
+// Error writes msg at error level through the server logger of the request.
+func Error(rq *http.Request, msg string, args ...any) {
+	Logger(rq).ErrorContext(rq.Context(), msg, args...)
 }
 
-// Error emits error level message using server logger associated with the request.
-func Error(rq *http.Request, msg string, fields ...zap.Field) {
-	Logger(rq).Error(msg, fields...)
+// Warn writes msg at warn level through the server logger of the request.
+func Warn(rq *http.Request, msg string, args ...any) {
+	Logger(rq).WarnContext(rq.Context(), msg, args...)
 }
 
-// Warn emits warn level message using server logger associated with the request.
-func Warn(rq *http.Request, msg string, fields ...zap.Field) {
-	Logger(rq).Warn(msg, fields...)
+// Info writes msg at info level through the server logger of the request.
+func Info(rq *http.Request, msg string, args ...any) {
+	Logger(rq).InfoContext(rq.Context(), msg, args...)
 }
 
-// Info emits info level message using server logger associated with the request.
-func Info(rq *http.Request, msg string, fields ...zap.Field) {
-	Logger(rq).Info(msg, fields...)
-}
-
-// Debug emits debug level message using server logger associated with the request.
-func Debug(rq *http.Request, msg string, fields ...zap.Field) {
-	Logger(rq).Debug(msg, fields...)
+// Debug writes msg at debug level through the server logger of the request.
+func Debug(rq *http.Request, msg string, args ...any) {
+	Logger(rq).DebugContext(rq.Context(), msg, args...)
 }

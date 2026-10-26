@@ -1,15 +1,13 @@
 package log_test
 
 import (
-	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
-	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
 
 	"sarak.sh/mikluko/multiproxy/pkg/middleware/log"
 )
@@ -18,7 +16,7 @@ func TestOutsideMiddleware(t *testing.T) {
 	rq := httptest.NewRequest(http.MethodGet, "/", nil)
 
 	require.NotPanics(t, func() {
-		log.With(rq, zap.String("k", "v"))
+		log.With(rq, "k", "v")
 		log.Named(rq, "name")
 		log.WithStatusCode(rq, http.StatusTeapot)
 		log.WithContentLength(rq, 42)
@@ -37,7 +35,7 @@ func TestUIDAndSequence(t *testing.T) {
 		seq uint64
 	}
 	var got []seen
-	h := log.Middleware(io.Discard, io.Discard, zapcore.InfoLevel)(http.HandlerFunc(func(_ http.ResponseWriter, rq *http.Request) {
+	h := log.Middleware(slog.New(slog.DiscardHandler), slog.New(slog.DiscardHandler))(http.HandlerFunc(func(_ http.ResponseWriter, rq *http.Request) {
 		got = append(got, seen{log.UID(rq), log.Sequence(rq)})
 	}))
 	for range 2 {
@@ -51,7 +49,7 @@ func TestUIDAndSequence(t *testing.T) {
 }
 
 func TestPanic(t *testing.T) {
-	h := log.Middleware(io.Discard, io.Discard, zapcore.InfoLevel)(http.HandlerFunc(func(_ http.ResponseWriter, rq *http.Request) {
+	h := log.Middleware(slog.New(slog.DiscardHandler), slog.New(slog.DiscardHandler))(http.HandlerFunc(func(_ http.ResponseWriter, rq *http.Request) {
 		log.Panic(rq, "boom")
 	}))
 	require.PanicsWithValue(t, "boom", func() {

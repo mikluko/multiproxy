@@ -16,7 +16,6 @@ import (
 	"time"
 
 	arc "github.com/hashicorp/golang-lru/arc/v2"
-	"go.uber.org/zap"
 
 	"sarak.sh/mikluko/multiproxy/pkg/issuer"
 	"sarak.sh/mikluko/multiproxy/pkg/middleware/log"
@@ -89,7 +88,7 @@ func (s *MITMHandler) ServeHTTP(rw http.ResponseWriter, rq *http.Request) {
 	conn, bufrw, err := hj.Hijack()
 	if err != nil {
 		s.httpError(rw, http.StatusInternalServerError)
-		log.Warn(rq, "failed to hijack client connection", zap.Error(err))
+		log.Warn(rq, "failed to hijack client connection", "error", err)
 		return
 	}
 	defer conn.Close()
@@ -100,7 +99,7 @@ func (s *MITMHandler) ServeHTTP(rw http.ResponseWriter, rq *http.Request) {
 	cert, err := s.certForRequest(rq)
 	if err != nil {
 		s.httpError(rw, http.StatusInternalServerError)
-		log.Warn(rq, "failed to issue certificate", zap.Error(err))
+		log.Warn(rq, "failed to issue certificate", "error", err)
 		return
 	}
 
@@ -117,7 +116,7 @@ func (s *MITMHandler) ServeHTTP(rw http.ResponseWriter, rq *http.Request) {
 	})
 	err = tlsconn.Handshake()
 	if err != nil {
-		log.Warn(rq, "TLS handshake failed", zap.Error(err))
+		log.Warn(rq, "TLS handshake failed", "error", err)
 		return
 	}
 	defer tlsconn.Close()
@@ -128,7 +127,7 @@ func (s *MITMHandler) ServeHTTP(rw http.ResponseWriter, rq *http.Request) {
 			if errors.Is(err, io.EOF) {
 				break
 			}
-			log.Debug(rq, "sub-request failed", zap.Uint64("sub-seq", seq), zap.Error(err))
+			log.Debug(rq, "sub-request failed", "sub-seq", seq, "error", err)
 			break
 		}
 	}

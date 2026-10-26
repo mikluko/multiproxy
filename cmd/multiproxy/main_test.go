@@ -6,9 +6,11 @@ import (
 	"crypto/rsa"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/json"
 	"encoding/pem"
 	"flag"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -158,10 +160,12 @@ func TestNewHandler(t *testing.T) {
 	t.Run("two fallback handlers", func(t *testing.T) {
 		cfg, err := parseFlags([]string{"-mitm", "*", "-tunnel", "*"}, io.Discard)
 		require.NoError(t, err)
-		_, err = newHandler(cfg, nil, io.Discard, io.Discard)
+		_, err = newHandler(cfg, nil, discard, discard)
 		require.Error(t, err)
 	})
 }
+
+var discard = slog.New(slog.DiscardHandler)
 
 // echoVia answers 200 and reports the Via and X-Test headers it received as X-Seen-Via and X-Seen-Test.
 func echoVia(rw http.ResponseWriter, rq *http.Request) {
@@ -177,7 +181,7 @@ func proxy(t *testing.T, args ...string) *url.URL {
 	require.NoError(t, err)
 	ca, err := loadCA(cfg)
 	require.NoError(t, err)
-	h, err := newHandler(cfg, ca, io.Discard, io.Discard)
+	h, err := newHandler(cfg, ca, discard, discard)
 	require.NoError(t, err)
 	s := httptest.NewServer(h)
 	t.Cleanup(s.Close)
@@ -263,7 +267,7 @@ func TestSOCKS(t *testing.T) {
 		require.NoError(t, err)
 		ca, err := loadCA(cfg)
 		require.NoError(t, err)
-		h, err := newHandler(cfg, ca, io.Discard, io.Discard)
+		h, err := newHandler(cfg, ca, discard, discard)
 		require.NoError(t, err)
 		l, err := net.Listen("tcp", "127.0.0.1:0")
 		require.NoError(t, err)
@@ -361,4 +365,20 @@ func freeAddr(t *testing.T) string {
 	addr := l.Addr().String()
 	require.NoError(t, l.Close())
 	return addr
+}
+
+func TestNewLoggers(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	access, server := newLoggers(&stdout, &stderr)
+	access.Info("", "url", "http://example.com/")
+	server.Warn("something", "error", "boom")
+
+	var a, s map[string]any
+	require.NoError(t, json.Unmarshal(stdout.Bytes(), &a))
+	require.NoError(t, json.Unmarshal(stderr.Bytes(), &s))
+	require.Equal(t, "http://example.com/", a["url"])
+	require.NotContains(t, a, "level")
+	require.NotContains(t, a, "msg")
+	require.Equal(t, "WARN", s["level"])
+	require.Equal(t, "something", s["msg"])
 }
