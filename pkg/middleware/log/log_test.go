@@ -13,7 +13,7 @@ import (
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 
-	"github.com/akabos/multiproxy/pkg/middleware/log"
+	"sarak.sh/mikluko/multiproxy/pkg/middleware/log"
 )
 
 func TestLog(t *testing.T) {

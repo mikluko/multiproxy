@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mccutchen/go-httpbin/httpbin"
+	"github.com/mccutchen/go-httpbin/v2/httpbin"
 )
 
 var (
@@ -20,10 +20,10 @@ var (
 )
 
 func TestMain(m *testing.M) {
-	testServer = httptest.NewServer(httpbin.NewHTTPBin().Handler())
+	testServer = httptest.NewServer(httpbin.New().Handler())
 	defer testServer.Close()
 
-	testTLSServer = httptest.NewTLSServer(httpbin.NewHTTPBin().Handler())
+	testTLSServer = httptest.NewTLSServer(httpbin.New().Handler())
 	defer testTLSServer.Close()
 
 	os.Exit(m.Run())

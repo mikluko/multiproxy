@@ -14,12 +14,12 @@ import (
 	"net/url"
 	"sync"
 
-	lru "github.com/hashicorp/golang-lru"
+	arc "github.com/hashicorp/golang-lru/arc/v2"
 	"go.uber.org/zap"
 	"golang.org/x/net/publicsuffix"
 
-	"github.com/akabos/multiproxy/pkg/issuer"
-	"github.com/akabos/multiproxy/pkg/middleware/log"
+	"sarak.sh/mikluko/multiproxy/pkg/issuer"
+	"sarak.sh/mikluko/multiproxy/pkg/middleware/log"
 )
 
 // MITMHandler is an HTTP proxy which handles CONNECT requests using  Man-in-the-Middle technique.
@@ -43,8 +43,13 @@ type MITMHandler struct {
 
 	once sync.Once
 
-	certCache    *lru.ARCCache
+	certCache    *arc.ARCCache[string, *certCacheEntry]
 	certCacheMux sync.Mutex
+}
+
+type certCacheEntry struct {
+	cert *tls.Certificate
+	mux  sync.Mutex
 }
 
 func (s *MITMHandler) init() {
@@ -57,7 +62,7 @@ func (s *MITMHandler) init() {
 	if s.CertCacheSize == 0 {
 		s.CertCacheSize = int(^uint(0) >> 1)
 	}
-	s.certCache, _ = lru.NewARC(s.CertCacheSize)
+	s.certCache, _ = arc.NewARC[string, *certCacheEntry](s.CertCacheSize)
 }
 
 func (s *MITMHandler) httpError(rw http.ResponseWriter, code int) {
@@ -144,17 +149,13 @@ func (s *MITMHandler) roundTrip(ctx context.Context, conn net.Conn) error {
 }
 
 func (s *MITMHandler) certForRequest(rq *http.Request) (*tls.Certificate, error) {
-	type cacheEntry struct {
-		cert *tls.Certificate
-		mux  sync.Mutex
-	}
 	var (
 		hostname    = rq.URL.Hostname()
 		cn          string
 		dnsnames    []string
 		ipaddresses []net.IP
 		err         error
-		entry       *cacheEntry
+		entry       *certCacheEntry
 	)
 
 	tldplus, err := publicsuffix.EffectiveTLDPlusOne(hostname)
@@ -171,12 +172,9 @@ func (s *MITMHandler) certForRequest(rq *http.Request) (*tls.Certificate, error)
 
 	s.certCacheMux.Lock()
 	if x, ok := s.certCache.Get(cn); ok {
-		entry, ok = x.(*cacheEntry)
-		if !ok {
-			panic("invalid value in cache")
-		}
+		entry = x
 	} else {
-		entry = &cacheEntry{}
+		entry = &certCacheEntry{}
 		s.certCache.Add(cn, entry)
 	}
 	entry.mux.Lock()

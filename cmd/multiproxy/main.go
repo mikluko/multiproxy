@@ -14,10 +14,10 @@ import (
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 
-	"github.com/akabos/multiproxy/pkg/handlers"
-	"github.com/akabos/multiproxy/pkg/middleware/log"
-	"github.com/akabos/multiproxy/pkg/middleware/via"
-	"github.com/akabos/multiproxy/pkg/router"
+	"sarak.sh/mikluko/multiproxy/pkg/handlers"
+	"sarak.sh/mikluko/multiproxy/pkg/middleware/log"
+	"sarak.sh/mikluko/multiproxy/pkg/middleware/via"
+	"sarak.sh/mikluko/multiproxy/pkg/router"
 )
 
 var (

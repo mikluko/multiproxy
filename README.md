@@ -2,26 +2,22 @@
 
 `multiproxy` is an extensible and performant HTTP proxy implemented in Go.
 
-[![Go Reference](https://pkg.go.dev/badge/github.com/akabos/multiproxy.svg)](https://pkg.go.dev/github.com/akabos/multiproxy)
-[![Go Report Card](https://goreportcard.com/badge/github.com/akabos/multiproxy)](https://goreportcard.com/report/github.com/akabos/multiproxy)
-[![Go Cover](https://gocover.io/_badge/github.com/akabos/multiproxy)](https://gocover.io/github.com/akabos/multiproxy)
-[![License](https://img.shields.io/github/license/akabos/multiproxy.svg)](https://github.com/akabos/multiproxy/blob/develop/LICENSE)
+[![Go Reference](https://pkg.go.dev/badge/sarak.sh/mikluko/multiproxy.svg)](https://pkg.go.dev/sarak.sh/mikluko/multiproxy)
+[![Go Report Card](https://goreportcard.com/badge/sarak.sh/mikluko/multiproxy)](https://goreportcard.com/report/sarak.sh/mikluko/multiproxy)
+[![Go Cover](https://gocover.io/_badge/sarak.sh/mikluko/multiproxy)](https://gocover.io/sarak.sh/mikluko/multiproxy)
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](https://forge.sarak.sh/mikluko/multiproxy/src/branch/develop/LICENSE)
 
 ## Requirements
 
-* Go v1.15 (not tested, but should work with >1.11)
+* Go 1.26 or later
 
 ## Installation
 
-    go install -u github.com/akabos/multiproxy/cmd 
+    go install sarak.sh/mikluko/multiproxy/cmd/multiproxy@latest
 
 ## Usage
 
     multiproxy 
-
-Running [pre-built docker image](https://hub.docker.com/r/akabos/multiproxy):
-
-    docker run -rm -p 8080:8080 akabos/multiproxy
 
 Making a request over the proxy:
 
@@ -80,3 +76,10 @@ If that is not what you want, you have to explicitly disable that behaviour:
 
 * Examples
 * Better test coverage
+
+## Releasing
+
+`CHANGELOG.md` decides releases. Work lands on `main` through pull requests from feature branches.
+To release, a pull request renames `## [Unreleased]` to `## [X.Y.Z] - YYYY-MM-DD` and opens a fresh
+`## [Unreleased]` above it. Merging it tags `vX.Y.Z` and publishes the release with that entry as
+its notes.
