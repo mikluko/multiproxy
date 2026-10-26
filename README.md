@@ -65,6 +65,17 @@ It is possible to run proxy in the mixed mode. E.g. handling some domains with M
 In the example above `example.com`, all it's subdomains and `example.net` would be served by MITM and all the other 
 hostnames with tunneling. 
 
+## SOCKS5
+
+`-socks` opens a SOCKS5 listener beside the HTTP one. Each SOCKS connection is routed by the same `-mitm` and
+`-tunnel` rules as a `CONNECT` request, and refused where they refuse one:
+
+    multiproxy -mitm '.example.com' -tunnel '*' -socks 127.0.0.1:1080
+
+    curl --socks5-hostname 127.0.0.1:1080 https://example.net
+
+Only the `CONNECT` command is supported, without authentication.
+
 ## Proxy headers
 
 According to [RFC 2616](https://tools.ietf.org/html/rfc2616#section-14.45), the Via general-header field MUST be used by 
