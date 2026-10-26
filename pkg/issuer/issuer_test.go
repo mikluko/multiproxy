@@ -6,7 +6,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/akabos/multiproxy/pkg/issuer"
+	"sarak.sh/mikluko/multiproxy/pkg/issuer"
 )
 
 func TestIssuer_Issue(t *testing.T) {

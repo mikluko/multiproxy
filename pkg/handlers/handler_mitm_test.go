@@ -13,7 +13,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/akabos/multiproxy/pkg/handlers"
+	"sarak.sh/mikluko/multiproxy/pkg/handlers"
 )
 
 func TestMITMHandler_ServeHTTP(t *testing.T) {

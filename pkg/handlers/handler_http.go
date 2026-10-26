@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/akabos/multiproxy/pkg/middleware/log"
+	"sarak.sh/mikluko/multiproxy/pkg/middleware/log"
 )
 
 // HTTPHandler is a plain HTTP proxy capable of serving any method except for CONNECT.

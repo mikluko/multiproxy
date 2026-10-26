@@ -16,8 +16,8 @@ import (
 	"github.com/mccutchen/go-httpbin/v2/httpbin"
 	"github.com/stretchr/testify/require"
 
-	"github.com/akabos/multiproxy/pkg/handlers"
-	router2 "github.com/akabos/multiproxy/pkg/router"
+	"sarak.sh/mikluko/multiproxy/pkg/handlers"
+	router2 "sarak.sh/mikluko/multiproxy/pkg/router"
 )
 
 var (

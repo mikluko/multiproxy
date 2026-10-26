@@ -1,4 +1,4 @@
-module github.com/akabos/multiproxy
+module sarak.sh/mikluko/multiproxy
 
 go 1.26.0
 

@@ -13,7 +13,7 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/akabos/multiproxy/pkg/middleware/log"
+	"sarak.sh/mikluko/multiproxy/pkg/middleware/log"
 )
 
 // Tunnel is a proxy server capable of serving CONNECT requests.

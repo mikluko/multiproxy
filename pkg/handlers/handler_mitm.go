@@ -18,8 +18,8 @@ import (
 	"go.uber.org/zap"
 	"golang.org/x/net/publicsuffix"
 
-	"github.com/akabos/multiproxy/pkg/issuer"
-	"github.com/akabos/multiproxy/pkg/middleware/log"
+	"sarak.sh/mikluko/multiproxy/pkg/issuer"
+	"sarak.sh/mikluko/multiproxy/pkg/middleware/log"
 )
 
 // MITMHandler is an HTTP proxy which handles CONNECT requests using  Man-in-the-Middle technique.
