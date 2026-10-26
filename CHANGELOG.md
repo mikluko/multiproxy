@@ -12,6 +12,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `headers.Rule.SetFunc` computes headers per request; an error answers the request with 502 Bad Gateway instead of forwarding it.
 - `handlers.ConnectAcceptor` lets a ResponseWriter answer an accepted `CONNECT` in its own protocol; `Tunnel` and `MITMHandler` use it where present, behind `Unwrap` too.
 - `issuer.Cache` keeps the certificates another Issuer issues, per common name, and issues again past `NotAfter`.
+- The `proxy` package assembles a complete proxy from host patterns, an Issuer, middleware and loggers with `proxy.New`.
+- `router.Router.HandleConnectHost` takes `*` as the fallback for hosts no other pattern matches.
 
 ### Changed
 

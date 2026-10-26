@@ -24,23 +24,24 @@ multiproxy -mitm api.example.com -ca-cert ca.pem -ca-key ca-key.pem \
 
 ## In a Go program
 
-Wrap the handlers in `headers.Rewrite`. `MITMHandler.Handler` serves every request intercepted from a `CONNECT`
-session, so a middleware around it sees those requests:
+Pass `headers.Rewrite` to `proxy.New` as middleware. It wraps every plain-HTTP request and every request intercepted
+by MITM:
 
 ```go
-rewrite := headers.Rewrite(headers.Rule{
-	Host: "api.example.com",
-	Set:  http.Header{"Authorization": {"Bearer " + os.Getenv("API_TOKEN")}},
+h, err := proxy.New(proxy.Config{
+	MITM:   []string{"api.example.com"},
+	Tunnel: []string{"*"},
+	Middleware: []func(http.Handler) http.Handler{
+		headers.Rewrite(headers.Rule{
+			Host: "api.example.com",
+			Set:  http.Header{"Authorization": {"Bearer " + os.Getenv("API_TOKEN")}},
+		}),
+	},
 })
-
-r := &router.Router{
-	Default: rewrite(&handlers.HTTPHandler{}),
+if err != nil {
+	log.Fatal(err)
 }
-r.HandleConnectHost("api.example.com", &handlers.MITMHandler{
-	Handler: rewrite(&handlers.HTTPHandler{}),
-})
-
-_ = http.ListenAndServe("127.0.0.1:8080", r)
+log.Fatal(http.ListenAndServe("127.0.0.1:8080", h))
 ```
 
 Any other middleware plugs in the same way.
@@ -64,11 +65,12 @@ rewrite := headers.Rewrite(headers.Rule{
 })
 ```
 
-`tokens.Get` and `ownerFromPath` stand for your own code. Pass `rq.Context()` to anything slow, so the work stops
+Pass `rewrite` in `Middleware` as above. `tokens.Get` and `ownerFromPath` stand for your own code. Pass
+`rq.Context()` to anything slow, so the work stops
 when the client goes away, and cache inside the function: multiproxy calls it on every matching request. When the
 function returns an error, multiproxy answers `502 Bad Gateway` and does not forward the request.
 
 ## What's next
 
-- [Package documentation](https://pkg.go.dev/sarak.sh/mikluko/multiproxy) describes the `headers`, `handlers` and
-  `router` packages.
+- [Package documentation](https://pkg.go.dev/sarak.sh/mikluko/multiproxy) describes the `proxy` and `headers`
+  packages, and the `handlers` and `router` packages for assembling a proxy from its parts.

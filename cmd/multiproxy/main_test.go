@@ -40,7 +40,7 @@ func TestParseFlags(t *testing.T) {
 		cfg, err := parseFlags(nil, io.Discard)
 		require.NoError(t, err)
 		require.Equal(t, "127.0.0.1:8080", cfg.listen)
-		require.Equal(t, "*", cfg.tunnelHosts)
+		require.Empty(t, cfg.tunnelHosts)
 		require.Empty(t, cfg.mitmHosts)
 		require.Equal(t, x509.RSA, cfg.leafKey)
 		require.Equal(t, issuer.DefaultIssuerValidity, cfg.leafValidity)
@@ -109,59 +109,59 @@ func TestNewHandler(t *testing.T) {
 	defer tlsBackend.Close()
 
 	t.Run("plain HTTP adds Via", func(t *testing.T) {
-		rs := get(t, proxy(t), backend.URL)
+		rs := get(t, startProxy(t), backend.URL)
 		require.Equal(t, http.StatusOK, rs.StatusCode)
 		require.NotEmpty(t, rs.Header.Get("X-Seen-Via"))
 	})
 	t.Run("plain HTTP without Via", func(t *testing.T) {
-		rs := get(t, proxy(t, "-novia"), backend.URL)
+		rs := get(t, startProxy(t, "-novia"), backend.URL)
 		require.Equal(t, http.StatusOK, rs.StatusCode)
 		require.Empty(t, rs.Header.Get("X-Seen-Via"))
 	})
 	t.Run("CONNECT is tunnelled by default", func(t *testing.T) {
-		rs := get(t, proxy(t), tlsBackend.URL)
+		rs := get(t, startProxy(t), tlsBackend.URL)
 		require.Equal(t, http.StatusOK, rs.StatusCode)
 		require.True(t, rs.TLS.PeerCertificates[0].Equal(tlsBackend.Certificate()))
 	})
 	t.Run("CONNECT to a -mitm host is intercepted", func(t *testing.T) {
-		rs := get(t, proxy(t, "-mitm", "127.0.0.1"), tlsBackend.URL)
+		rs := get(t, startProxy(t, "-mitm", "127.0.0.1"), tlsBackend.URL)
 		require.Equal(t, http.StatusOK, rs.StatusCode)
 		leaf := rs.TLS.PeerCertificates[0]
 		require.Equal(t, issuer.DefaultIssuerRootTmpl.Subject.CommonName, leaf.Issuer.CommonName)
 		require.IsType(t, &rsa.PublicKey{}, leaf.PublicKey)
 	})
 	t.Run("-leaf-key ecdsa", func(t *testing.T) {
-		rs := get(t, proxy(t, "-mitm", "127.0.0.1", "-leaf-key", "ecdsa"), tlsBackend.URL)
+		rs := get(t, startProxy(t, "-mitm", "127.0.0.1", "-leaf-key", "ecdsa"), tlsBackend.URL)
 		require.Equal(t, http.StatusOK, rs.StatusCode)
 		require.IsType(t, &ecdsa.PublicKey{}, rs.TLS.PeerCertificates[0].PublicKey)
 	})
 	t.Run("CONNECT to an unlisted host is refused", func(t *testing.T) {
-		p := proxy(t, "-mitm", "example.com")
+		p := startProxy(t, "-mitm", "example.com")
 		_, err := client(p).Get(tlsBackend.URL)
 		require.ErrorContains(t, err, "Method Not Allowed")
 	})
 	t.Run("plain HTTP to an unlisted host is refused", func(t *testing.T) {
-		rs := get(t, proxy(t, "-mitm", "example.com"), backend.URL)
+		rs := get(t, startProxy(t, "-mitm", "example.com"), backend.URL)
 		require.Equal(t, http.StatusForbidden, rs.StatusCode)
 	})
 	t.Run("plain HTTP to a listed host passes", func(t *testing.T) {
-		rs := get(t, proxy(t, "-tunnel", "127.0.0.1"), backend.URL)
+		rs := get(t, startProxy(t, "-tunnel", "127.0.0.1"), backend.URL)
 		require.Equal(t, http.StatusOK, rs.StatusCode)
 	})
 	t.Run("-set-header on plain HTTP", func(t *testing.T) {
-		rs := get(t, proxy(t, "-set-header", "127.0.0.1=X-Test: yes"), backend.URL)
+		rs := get(t, startProxy(t, "-set-header", "127.0.0.1=X-Test: yes"), backend.URL)
 		require.Equal(t, "yes", rs.Header.Get("X-Seen-Test"))
 	})
 	t.Run("-set-header on an intercepted request", func(t *testing.T) {
-		rs := get(t, proxy(t, "-mitm", "127.0.0.1", "-set-header", "127.0.0.1=X-Test: yes"), tlsBackend.URL)
+		rs := get(t, startProxy(t, "-mitm", "127.0.0.1", "-set-header", "127.0.0.1=X-Test: yes"), tlsBackend.URL)
 		require.Equal(t, "yes", rs.Header.Get("X-Seen-Test"))
 	})
 	t.Run("-set-header on another host", func(t *testing.T) {
-		rs := get(t, proxy(t, "-set-header", "example.com=X-Test: yes"), backend.URL)
+		rs := get(t, startProxy(t, "-set-header", "example.com=X-Test: yes"), backend.URL)
 		require.Empty(t, rs.Header.Get("X-Seen-Test"))
 	})
 	t.Run("-del-header", func(t *testing.T) {
-		rs := get(t, proxy(t, "-del-header", "*=Via"), backend.URL)
+		rs := get(t, startProxy(t, "-del-header", "*=Via"), backend.URL)
 		require.Empty(t, rs.Header.Get("X-Seen-Via"))
 	})
 	t.Run("two fallback handlers", func(t *testing.T) {
@@ -181,8 +181,8 @@ func echoVia(rw http.ResponseWriter, rq *http.Request) {
 	rw.WriteHeader(http.StatusOK)
 }
 
-// proxy starts the proxy configured by args and returns its URL.
-func proxy(t *testing.T, args ...string) *url.URL {
+// startProxy starts the proxy configured by args and returns its URL.
+func startProxy(t *testing.T, args ...string) *url.URL {
 	t.Helper()
 	cfg, err := parseFlags(append([]string{"-noaccesslog"}, args...), io.Discard)
 	require.NoError(t, err)
@@ -238,7 +238,7 @@ func TestLoadCA(t *testing.T) {
 		roots := x509.NewCertPool()
 		roots.AddCert(first.Leaf)
 		c := &http.Client{Transport: &http.Transport{
-			Proxy:           http.ProxyURL(proxy(t, append(args, "-mitm", "127.0.0.1")...)),
+			Proxy:           http.ProxyURL(startProxy(t, append(args, "-mitm", "127.0.0.1")...)),
 			TLSClientConfig: &tls.Config{RootCAs: roots},
 		}}
 		rs, err := c.Get(backend.URL)

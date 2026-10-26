@@ -56,7 +56,12 @@ func (r *Router) init() {
 //
 //  would match handler A for the target host `example.com`
 //
+// The pattern `*` sets Connect, the fallback for hosts no other pattern matches, whenever it is added.
 func (r *Router) HandleConnectHost(host string, handler http.Handler) {
+	if host == "*" {
+		r.Connect = handler
+		return
+	}
 	r.matchers = append(r.matchers, matcher{
 		tpl:     host,
 		handler: handler,

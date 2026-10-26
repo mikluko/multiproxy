@@ -19,15 +19,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/justinas/alice"
-	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
-
-	"sarak.sh/mikluko/multiproxy/pkg/handlers"
 	"sarak.sh/mikluko/multiproxy/pkg/issuer"
 	"sarak.sh/mikluko/multiproxy/pkg/middleware/headers"
-	"sarak.sh/mikluko/multiproxy/pkg/middleware/log"
-	"sarak.sh/mikluko/multiproxy/pkg/middleware/via"
-	"sarak.sh/mikluko/multiproxy/pkg/router"
+	"sarak.sh/mikluko/multiproxy/pkg/proxy"
 	"sarak.sh/mikluko/multiproxy/pkg/socks5"
 )
 
@@ -49,7 +43,7 @@ type config struct {
 	socks           string
 }
 
-// parseFlags reads the command line. With neither -mitm nor -tunnel given, every CONNECT host is tunnelled.
+// parseFlags reads the command line.
 func parseFlags(args []string, output io.Writer) (config, error) {
 	var (
 		cfg     config
@@ -91,9 +85,6 @@ func parseFlags(args []string, output io.Writer) (config, error) {
 	if (cfg.caCert == "") != (cfg.caKey == "") {
 		return config{}, errors.New("-ca-cert and -ca-key: give both or neither")
 	}
-	if cfg.mitmHosts == "" && cfg.tunnelHosts == "" {
-		cfg.tunnelHosts = "*"
-	}
 	return cfg, nil
 }
 
@@ -116,61 +107,37 @@ func writeCA(w io.Writer, ca *tls.Certificate) error {
 }
 
 // newHandler builds the proxy described by cfg, signing MITM certificates with ca, logging each request through
-// access and server. Each request, and each request intercepted by MITM, is a server span of the global tracer
-// provider, and each upstream request a client span propagated to the upstream server.
+// access and server.
 func newHandler(cfg config, ca *tls.Certificate, access, server *slog.Logger) (http.Handler, error) {
 	if cfg.noAccessLog {
-		access = slog.New(slog.DiscardHandler)
+		access = nil
 	}
-	lmw := log.Middleware(access, server)
-
-	named := func(name string) alice.Constructor {
-		return func(next http.Handler) http.Handler {
-			return http.HandlerFunc(func(rw http.ResponseWriter, rq *http.Request) {
-				log.Named(rq, name)
-				next.ServeHTTP(rw, rq)
-			})
-		}
-	}
-
-	upstream := otelhttp.NewTransport(handlers.DefaultTransport)
-	httpMiddleware := []alice.Constructor{lmw, named("http")}
-	if !cfg.noVia {
-		httpMiddleware = append(httpMiddleware, via.Via)
-	}
+	var middleware []func(http.Handler) http.Handler
 	if len(cfg.headerRules) > 0 {
-		httpMiddleware = append(httpMiddleware, headers.Rewrite(cfg.headerRules...))
+		middleware = append(middleware, headers.Rewrite(cfg.headerRules...))
 	}
-	mux := &router.Router{
-		Default: alice.New(httpMiddleware...).Then(&handlers.HTTPHandler{
-			Transport:       upstream,
-			NoXForwardedFor: cfg.noXForwardedFor,
-		}),
-	}
-
-	mitmHandler := &handlers.MITMHandler{
-		Handler: otelhttp.NewHandler(alice.New(httpMiddleware...).Then(&handlers.HTTPHandler{
-			Transport:       upstream,
-			NoXForwardedFor: cfg.noXForwardedFor,
-		}), "mitm", spanName),
+	return proxy.New(proxy.Config{
+		MITM:   patterns(cfg.mitmHosts),
+		Tunnel: patterns(cfg.tunnelHosts),
 		Issuer: &issuer.Cache{Issuer: &issuer.SelfSignedCA{
 			Cert:         ca,
 			KeyAlgorithm: cfg.leafKey,
 			Validity:     cfg.leafValidity,
 		}},
-	}
-	if err := registerHandler(mux, alice.New(lmw, named("mitm")).Then(mitmHandler), cfg.mitmHosts); err != nil {
-		return nil, err
-	}
+		Middleware:      middleware,
+		NoVia:           cfg.noVia,
+		NoXForwardedFor: cfg.noXForwardedFor,
+		Access:          access,
+		Server:          server,
+	})
+}
 
-	tunnelHandler := &handlers.Tunnel{
-		DialTimeout: 5 * time.Second,
+// patterns splits a comma-separated flag value into host patterns.
+func patterns(flag string) []string {
+	if flag == "" {
+		return nil
 	}
-	if err := registerHandler(mux, alice.New(lmw, named("tunnel")).Then(tunnelHandler), cfg.tunnelHosts); err != nil {
-		return nil, err
-	}
-
-	return otelhttp.NewHandler(mux, "proxy", spanName), nil
+	return strings.Split(flag, ",")
 }
 
 func main() {
@@ -252,31 +219,5 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 }
 
-// spanName names a span after the request method, and after the target too for CONNECT.
-var spanName = otelhttp.WithSpanNameFormatter(func(_ string, rq *http.Request) string {
-	if rq.Method == http.MethodConnect {
-		return "CONNECT " + rq.Host
-	}
-	return rq.Method
-})
-
 // shutdownTimeout bounds the flush of telemetry on exit.
 const shutdownTimeout = 5 * time.Second
-
-func registerHandler(mux *router.Router, handler http.Handler, hostnames string) error {
-	if hostnames == "" {
-		return nil
-	}
-	for _, hostname := range strings.Split(hostnames, ",") {
-		hostname = strings.TrimSpace(hostname)
-		if hostname != "*" {
-			mux.HandleConnectHost(hostname, handler)
-			continue
-		}
-		if mux.Connect != nil {
-			return errors.New("multiple fallback handlers specified")
-		}
-		mux.Connect = handler
-	}
-	return nil
-}
