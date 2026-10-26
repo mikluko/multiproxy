@@ -135,7 +135,6 @@ _ = http.ListenAndServe("127.0.0.1:8080", r)
 ## TODO
 
 * Examples
-* Better test coverage
 
 ## Releasing
 
