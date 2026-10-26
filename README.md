@@ -3,9 +3,7 @@
 `multiproxy` is an extensible and performant HTTP proxy implemented in Go.
 
 [![Go Reference](https://pkg.go.dev/badge/sarak.sh/mikluko/multiproxy.svg)](https://pkg.go.dev/sarak.sh/mikluko/multiproxy)
-[![Go Report Card](https://goreportcard.com/badge/sarak.sh/mikluko/multiproxy)](https://goreportcard.com/report/sarak.sh/mikluko/multiproxy)
-[![Go Cover](https://gocover.io/_badge/sarak.sh/mikluko/multiproxy)](https://gocover.io/sarak.sh/mikluko/multiproxy)
-[![License](https://img.shields.io/badge/license-MIT-blue.svg)](https://forge.sarak.sh/mikluko/multiproxy/src/branch/develop/LICENSE)
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](https://forge.sarak.sh/mikluko/multiproxy/src/branch/main/LICENSE)
 
 ## Requirements
 
