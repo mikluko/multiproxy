@@ -20,8 +20,8 @@ Table: flags of the `multiproxy` command.
 | `-tunnel <patterns>` | none | Comma-separated host patterns whose `CONNECT` sessions are tunnelled. |
 | `-ca-cert <file>` | none | PEM file of the CA certificate that signs intercepted hosts' certificates. Requires `-ca-key`. |
 | `-ca-key <file>` | none | PEM file of the CA private key. Requires `-ca-cert`. |
-| `-ca-name <name>` | `root.example.org` | Common name of a CA that multiproxy creates. |
-| `-ca-org <name>` | `Multiproxy Root Org` | Organization of a CA that multiproxy creates. |
+| `-ca-name <name>` | `multiproxy CA` | Common name of a proxy CA that multiproxy creates. |
+| `-ca-org <name>` | `multiproxy` | Organization of a proxy CA that multiproxy creates. |
 | `-print-ca` | off | Prints the CA certificate as PEM to stdout and exits. |
 | `-leaf-key <algorithm>` | `rsa` | Key algorithm of leaf certificates: `rsa` for RSA 2048, `ecdsa` for ECDSA P-256. |
 | `-leaf-validity <duration>` | `720h0m0s` | Validity of leaf certificates, as a Go duration such as `168h`. |

@@ -71,10 +71,10 @@ func TestSetupTelemetry_exports(t *testing.T) {
 	})
 
 	seen := make(chan string, 1)
-	backend := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, rq *http.Request) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, rq *http.Request) {
 		seen <- rq.Header.Get("Traceparent")
 	}))
-	defer backend.Close()
+	defer upstream.Close()
 
 	var stdout bytes.Buffer
 	access, server, shutdown, err := setupTelemetry(context.Background(), &stdout, io.Discard)
@@ -89,7 +89,7 @@ func TestSetupTelemetry_exports(t *testing.T) {
 	defer p.Close()
 
 	const clientTrace = "4bf92f3577b34da6a3ce929d0e0e4736"
-	rq, err := http.NewRequest(http.MethodGet, backend.URL, nil)
+	rq, err := http.NewRequest(http.MethodGet, upstream.URL, nil)
 	require.NoError(t, err)
 	rq.Header.Set("Traceparent", "00-"+clientTrace+"-00f067aa0ba902b7-01")
 	pu, err := url.Parse(p.URL)
@@ -98,9 +98,9 @@ func TestSetupTelemetry_exports(t *testing.T) {
 	require.NoError(t, err)
 	_ = rs.Body.Close()
 
-	upstream := <-seen
-	require.Contains(t, upstream, clientTrace)
-	require.NotContains(t, upstream, "00f067aa0ba902b7")
+	traceparent := <-seen
+	require.Contains(t, traceparent, clientTrace)
+	require.NotContains(t, traceparent, "00f067aa0ba902b7")
 
 	require.NoError(t, shutdown(context.Background()))
 	require.Contains(t, stdout.String(), `"trace_id":"`+clientTrace+`"`)

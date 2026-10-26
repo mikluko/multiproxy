@@ -107,66 +107,66 @@ func TestParseFlags(t *testing.T) {
 }
 
 func TestNewHandler(t *testing.T) {
-	backend := httptest.NewServer(http.HandlerFunc(echoVia))
-	defer backend.Close()
-	tlsBackend := httptest.NewTLSServer(http.HandlerFunc(echoVia))
-	defer tlsBackend.Close()
-	upstreamCA := certFile(t, tlsBackend)
+	upstream := httptest.NewServer(http.HandlerFunc(echoVia))
+	defer upstream.Close()
+	tlsUpstream := httptest.NewTLSServer(http.HandlerFunc(echoVia))
+	defer tlsUpstream.Close()
+	upstreamCA := certFile(t, tlsUpstream)
 
 	t.Run("plain HTTP adds Via", func(t *testing.T) {
-		rs := get(t, startProxy(t), backend.URL)
+		rs := get(t, startProxy(t), upstream.URL)
 		require.Equal(t, http.StatusOK, rs.StatusCode)
 		require.NotEmpty(t, rs.Header.Get("X-Seen-Via"))
 	})
 	t.Run("plain HTTP without Via", func(t *testing.T) {
-		rs := get(t, startProxy(t, "-novia"), backend.URL)
+		rs := get(t, startProxy(t, "-novia"), upstream.URL)
 		require.Equal(t, http.StatusOK, rs.StatusCode)
 		require.Empty(t, rs.Header.Get("X-Seen-Via"))
 	})
 	t.Run("CONNECT is tunnelled by default", func(t *testing.T) {
-		rs := get(t, startProxy(t), tlsBackend.URL)
+		rs := get(t, startProxy(t), tlsUpstream.URL)
 		require.Equal(t, http.StatusOK, rs.StatusCode)
-		require.True(t, rs.TLS.PeerCertificates[0].Equal(tlsBackend.Certificate()))
+		require.True(t, rs.TLS.PeerCertificates[0].Equal(tlsUpstream.Certificate()))
 	})
 	t.Run("CONNECT to a -mitm host is intercepted", func(t *testing.T) {
-		rs := get(t, startProxy(t, "-mitm", "127.0.0.1", "-upstream-ca", upstreamCA), tlsBackend.URL)
+		rs := get(t, startProxy(t, "-mitm", "127.0.0.1", "-upstream-ca", upstreamCA), tlsUpstream.URL)
 		require.Equal(t, http.StatusOK, rs.StatusCode)
 		leaf := rs.TLS.PeerCertificates[0]
-		require.Equal(t, issuer.DefaultIssuerRootTmpl.Subject.CommonName, leaf.Issuer.CommonName)
+		require.Equal(t, issuer.DefaultIssuerCATmpl.Subject.CommonName, leaf.Issuer.CommonName)
 		require.IsType(t, &rsa.PublicKey{}, leaf.PublicKey)
 	})
 	t.Run("-leaf-key ecdsa", func(t *testing.T) {
-		rs := get(t, startProxy(t, "-mitm", "127.0.0.1", "-upstream-ca", upstreamCA, "-leaf-key", "ecdsa"), tlsBackend.URL)
+		rs := get(t, startProxy(t, "-mitm", "127.0.0.1", "-upstream-ca", upstreamCA, "-leaf-key", "ecdsa"), tlsUpstream.URL)
 		require.Equal(t, http.StatusOK, rs.StatusCode)
 		require.IsType(t, &ecdsa.PublicKey{}, rs.TLS.PeerCertificates[0].PublicKey)
 	})
 	t.Run("CONNECT to an unlisted host is refused", func(t *testing.T) {
 		p := startProxy(t, "-mitm", "example.com")
-		_, err := client(p).Get(tlsBackend.URL)
+		_, err := client(p).Get(tlsUpstream.URL)
 		require.ErrorContains(t, err, "Method Not Allowed")
 	})
 	t.Run("plain HTTP to an unlisted host is refused", func(t *testing.T) {
-		rs := get(t, startProxy(t, "-mitm", "example.com"), backend.URL)
+		rs := get(t, startProxy(t, "-mitm", "example.com"), upstream.URL)
 		require.Equal(t, http.StatusForbidden, rs.StatusCode)
 	})
 	t.Run("plain HTTP to a listed host passes", func(t *testing.T) {
-		rs := get(t, startProxy(t, "-tunnel", "127.0.0.1"), backend.URL)
+		rs := get(t, startProxy(t, "-tunnel", "127.0.0.1"), upstream.URL)
 		require.Equal(t, http.StatusOK, rs.StatusCode)
 	})
 	t.Run("-set-header on plain HTTP", func(t *testing.T) {
-		rs := get(t, startProxy(t, "-set-header", "127.0.0.1=X-Test: yes"), backend.URL)
+		rs := get(t, startProxy(t, "-set-header", "127.0.0.1=X-Test: yes"), upstream.URL)
 		require.Equal(t, "yes", rs.Header.Get("X-Seen-Test"))
 	})
 	t.Run("-set-header on an intercepted request", func(t *testing.T) {
-		rs := get(t, startProxy(t, "-mitm", "127.0.0.1", "-upstream-ca", upstreamCA, "-set-header", "127.0.0.1=X-Test: yes"), tlsBackend.URL)
+		rs := get(t, startProxy(t, "-mitm", "127.0.0.1", "-upstream-ca", upstreamCA, "-set-header", "127.0.0.1=X-Test: yes"), tlsUpstream.URL)
 		require.Equal(t, "yes", rs.Header.Get("X-Seen-Test"))
 	})
 	t.Run("-set-header on another host", func(t *testing.T) {
-		rs := get(t, startProxy(t, "-set-header", "example.com=X-Test: yes"), backend.URL)
+		rs := get(t, startProxy(t, "-set-header", "example.com=X-Test: yes"), upstream.URL)
 		require.Empty(t, rs.Header.Get("X-Seen-Test"))
 	})
 	t.Run("-del-header", func(t *testing.T) {
-		rs := get(t, startProxy(t, "-del-header", "*=Via"), backend.URL)
+		rs := get(t, startProxy(t, "-del-header", "*=Via"), upstream.URL)
 		require.Empty(t, rs.Header.Get("X-Seen-Via"))
 	})
 	t.Run("two fallback handlers", func(t *testing.T) {
@@ -220,11 +220,11 @@ func get(t *testing.T, p *url.URL, target string) *http.Response {
 
 func TestLoadCA(t *testing.T) {
 	t.Run("in memory, named by -ca-name and -ca-org", func(t *testing.T) {
-		cfg, err := parseFlags([]string{"-ca-name", "Test Root", "-ca-org", "Test Org"}, io.Discard)
+		cfg, err := parseFlags([]string{"-ca-name", "Test CA", "-ca-org", "Test Org"}, io.Discard)
 		require.NoError(t, err)
 		ca, err := loadCA(cfg)
 		require.NoError(t, err)
-		require.Equal(t, "Test Root", ca.Leaf.Subject.CommonName)
+		require.Equal(t, "Test CA", ca.Leaf.Subject.CommonName)
 		require.Equal(t, []string{"Test Org"}, ca.Leaf.Subject.Organization)
 	})
 	t.Run("persisted, then trusted by a verifying client", func(t *testing.T) {
@@ -238,15 +238,15 @@ func TestLoadCA(t *testing.T) {
 		require.NoError(t, err)
 		require.True(t, first.Leaf.Equal(second.Leaf))
 
-		backend := httptest.NewTLSServer(http.HandlerFunc(echoVia))
-		defer backend.Close()
+		upstream := httptest.NewTLSServer(http.HandlerFunc(echoVia))
+		defer upstream.Close()
 		roots := x509.NewCertPool()
 		roots.AddCert(first.Leaf)
 		c := &http.Client{Transport: &http.Transport{
-			Proxy:           http.ProxyURL(startProxy(t, append(args, "-mitm", "127.0.0.1", "-upstream-ca", certFile(t, backend))...)),
+			Proxy:           http.ProxyURL(startProxy(t, append(args, "-mitm", "127.0.0.1", "-upstream-ca", certFile(t, upstream))...)),
 			TLSClientConfig: &tls.Config{RootCAs: roots},
 		}}
-		rs, err := c.Get(backend.URL)
+		rs, err := c.Get(upstream.URL)
 		require.NoError(t, err)
 		defer rs.Body.Close()
 		require.Equal(t, http.StatusOK, rs.StatusCode)
@@ -269,9 +269,9 @@ func TestWriteCA(t *testing.T) {
 }
 
 func TestSOCKS(t *testing.T) {
-	backend := httptest.NewServer(http.HandlerFunc(echoVia))
-	defer backend.Close()
-	target := strings.TrimPrefix(backend.URL, "http://")
+	upstream := httptest.NewServer(http.HandlerFunc(echoVia))
+	defer upstream.Close()
+	target := strings.TrimPrefix(upstream.URL, "http://")
 
 	socks := func(t *testing.T, args ...string) string {
 		t.Helper()
@@ -330,12 +330,12 @@ func TestRun(t *testing.T) {
 	})
 	t.Run("-print-ca", func(t *testing.T) {
 		var stdout bytes.Buffer
-		require.Equal(t, 0, run([]string{"-print-ca", "-ca-name", "Printed Root"}, &stdout, io.Discard))
+		require.Equal(t, 0, run([]string{"-print-ca", "-ca-name", "Printed CA"}, &stdout, io.Discard))
 		block, _ := pem.Decode(stdout.Bytes())
 		require.NotNil(t, block)
 		cert, err := x509.ParseCertificate(block.Bytes)
 		require.NoError(t, err)
-		require.Equal(t, "Printed Root", cert.Subject.CommonName)
+		require.Equal(t, "Printed CA", cert.Subject.CommonName)
 	})
 	for name, args := range map[string][]string{
 		"an unreadable CA":     {"-ca-cert", filepath.Join(t.TempDir(), "ca.pem"), "-ca-key", t.TempDir()},
@@ -350,22 +350,22 @@ func TestRun(t *testing.T) {
 		})
 	}
 	t.Run("serves HTTP and SOCKS5", func(t *testing.T) {
-		backend := httptest.NewServer(http.HandlerFunc(echoVia))
-		defer backend.Close()
+		upstream := httptest.NewServer(http.HandlerFunc(echoVia))
+		defer upstream.Close()
 		httpAddr, socksAddr := freeAddr(t), freeAddr(t)
 		go run([]string{"-noaccesslog", "-listen", httpAddr, "-socks", socksAddr}, io.Discard, io.Discard)
 
 		p, err := url.Parse("http://" + httpAddr)
 		require.NoError(t, err)
 		require.Eventually(t, func() bool {
-			rs, err := client(p).Get(backend.URL)
+			rs, err := client(p).Get(upstream.URL)
 			if err != nil {
 				return false
 			}
 			_ = rs.Body.Close()
 			return rs.StatusCode == http.StatusOK
 		}, 5*time.Second, 50*time.Millisecond)
-		require.Equal(t, byte(0), socksConnect(t, socksAddr, strings.TrimPrefix(backend.URL, "http://")))
+		require.Equal(t, byte(0), socksConnect(t, socksAddr, strings.TrimPrefix(upstream.URL, "http://")))
 	})
 }
 
@@ -397,15 +397,15 @@ func TestNewLogHandlers(t *testing.T) {
 }
 
 func TestUpstreamVerification(t *testing.T) {
-	backend := httptest.NewTLSServer(http.HandlerFunc(echoVia))
-	defer backend.Close()
+	upstream := httptest.NewTLSServer(http.HandlerFunc(echoVia))
+	defer upstream.Close()
 
 	t.Run("an untrusted upstream is a bad gateway", func(t *testing.T) {
-		rs := get(t, startProxy(t, "-mitm", "127.0.0.1"), backend.URL)
+		rs := get(t, startProxy(t, "-mitm", "127.0.0.1"), upstream.URL)
 		require.Equal(t, http.StatusBadGateway, rs.StatusCode)
 	})
 	t.Run("-upstream-insecure trusts any upstream", func(t *testing.T) {
-		rs := get(t, startProxy(t, "-mitm", "127.0.0.1", "-upstream-insecure"), backend.URL)
+		rs := get(t, startProxy(t, "-mitm", "127.0.0.1", "-upstream-insecure"), upstream.URL)
 		require.Equal(t, http.StatusOK, rs.StatusCode)
 	})
 	t.Run("-upstream-ca names a missing file", func(t *testing.T) {

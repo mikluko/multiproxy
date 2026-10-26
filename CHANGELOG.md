@@ -22,6 +22,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Breaking:** `socks5.Server` no longer offers `Hijack` on its ResponseWriter; a handler accepts the connection with `AcceptConnect` instead of hijacking it and writing `200 OK`.
 - **Breaking:** `MITMHandler.CertCacheSize` is removed and `MITMHandler` keeps no certificates itself; an Issuer you set is called on every `CONNECT` unless you wrap it in `issuer.Cache`.
 - **Breaking:** intercepted upstreams must present a certificate that verifies against the system roots, or `502 Bad Gateway` is answered; `handlers.DefaultTransport` verifies. Add `-upstream-ca` for a private CA, or `-upstream-insecure` for the old behaviour.
+- **Breaking:** `issuer` names the proxy CA a CA instead of a root: `NewRoot` is `NewCA`, `RootTemplate` is `CATemplate`, `SelfSignedCA.RootBitSize` and `RootTmpl` are `CABitSize` and `CATmpl`, and `DefaultIssuerRootBitSize` and `DefaultIssuerRootTmpl` are `DefaultIssuerCABitSize` and `DefaultIssuerCATmpl`.
+- A proxy CA that multiproxy creates is named `multiproxy CA`, of organization `multiproxy`, instead of `root.example.org` of `Multiproxy Root Org`; a CA read from `-ca-cert` keeps its name.
+- The default templates carry no placeholder DNS name, OCSP server or issuer name on the proxy CA, and no country on leaf certificates.
 
 ### Fixed
 

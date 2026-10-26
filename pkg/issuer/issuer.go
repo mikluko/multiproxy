@@ -45,20 +45,20 @@ type SelfSignedCA struct {
 	// If 0, DefaultIssuerValidity will be used.
 	Validity time.Duration
 
-	// RootBitSize defines bit size for the key of a generated proxy CA.
+	// CABitSize defines bit size for the key of a generated proxy CA.
 	//
-	// If 0, DefaultIssuerRootBitSize will be used.
-	RootBitSize int
+	// If 0, DefaultIssuerCABitSize will be used.
+	CABitSize int
 
 	// Tmpl is a template for leaf certificates.
 	//
 	// If nil, DefaultIssuerTmpl will be used.
 	Tmpl *x509.Certificate
 
-	// RootTmpl is a template for a generated proxy CA.
+	// CATmpl is a template for a generated proxy CA.
 	//
-	// If nil, DefaultIssuerRootTmpl will be used.
-	RootTmpl *x509.Certificate
+	// If nil, DefaultIssuerCATmpl will be used.
+	CATmpl *x509.Certificate
 
 	// Rand is a source of randomness for generated certs.
 	//
@@ -127,8 +127,8 @@ func (ca *SelfSignedCA) init() {
 	if ca.Tmpl == nil {
 		ca.Tmpl = &DefaultIssuerTmpl
 	}
-	if ca.RootTmpl == nil {
-		ca.RootTmpl = &DefaultIssuerRootTmpl
+	if ca.CATmpl == nil {
+		ca.CATmpl = &DefaultIssuerCATmpl
 	}
 	if ca.KeyAlgorithm == x509.UnknownPublicKeyAlgorithm {
 		ca.KeyAlgorithm = x509.RSA
@@ -139,11 +139,11 @@ func (ca *SelfSignedCA) init() {
 	if ca.Validity == 0 {
 		ca.Validity = DefaultIssuerValidity
 	}
-	if ca.RootBitSize == 0 {
-		ca.RootBitSize = DefaultIssuerRootBitSize
+	if ca.CABitSize == 0 {
+		ca.CABitSize = DefaultIssuerCABitSize
 	}
 	if ca.Cert == nil {
-		ca.initRootCert()
+		ca.initCA()
 	}
 	if ca.Cert.Leaf == nil {
 		// pre-parse leaf certificate, ignore potential error, it will inevitably pop up on the first use any way
@@ -151,16 +151,16 @@ func (ca *SelfSignedCA) init() {
 	}
 }
 
-func (ca *SelfSignedCA) initRootCert() {
-	cert, err := NewRoot(ca.RootTmpl, ca.RootBitSize, ca.Rand)
+func (ca *SelfSignedCA) initCA() {
+	cert, err := NewCA(ca.CATmpl, ca.CABitSize, ca.Rand)
 	if err != nil {
 		panic(err)
 	}
 	ca.Cert = cert
 }
 
-// DefaultIssuerRootBitSize defines default bit size for the key of a generated proxy CA.
-const DefaultIssuerRootBitSize = 2048
+// DefaultIssuerCABitSize defines default bit size for the key of a generated proxy CA.
+const DefaultIssuerCABitSize = 2048
 
 // DefaultIssuerBitSize defines default bit size for issued RSA keys.
 const DefaultIssuerBitSize = 2048
@@ -169,32 +169,13 @@ const DefaultIssuerBitSize = 2048
 const DefaultIssuerValidity = 30 * 24 * time.Hour
 
 var (
-	// DefaultIssuerRootTmpl is the default template for a generated proxy CA.
-	DefaultIssuerRootTmpl = x509.Certificate{
-		SerialNumber: big.NewInt(1),
-		Issuer: pkix.Name{
-			CommonName:   "issuer.example.org",
-			Organization: []string{"Multiproxy Issuer Org"},
-		},
-		Subject: pkix.Name{
-			CommonName:   "root.example.org",
-			Organization: []string{"Multiproxy Root Org"},
-		},
-		NotBefore:             time.Now(),
-		NotAfter:              time.Now().Add(time.Hour * 24 * 365 * 2),
-		IsCA:                  true,
-		BasicConstraintsValid: true,
-		OCSPServer:            []string{"ocsp.example.org"},
-		DNSNames:              []string{"root.example.org"},
-		KeyUsage:              x509.KeyUsageCertSign,
-	}
+	// DefaultIssuerCATmpl is the default template for a generated proxy CA.
+	DefaultIssuerCATmpl = *CATemplate("multiproxy CA", "multiproxy", 2*365*24*time.Hour)
 
 	// DefaultIssuerTmpl is the default template for leaf certificates.
 	DefaultIssuerTmpl = x509.Certificate{
-		SerialNumber: big.NewInt(1),
 		Subject: pkix.Name{
-			Country:      []string{"AQ"},
-			Organization: []string{"Multiproxy"},
+			Organization: []string{"multiproxy"},
 		},
 		KeyUsage:    x509.KeyUsageDigitalSignature,
 		ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
