@@ -46,3 +46,13 @@ func (m *matcher) matchesSuffix(hostname string) bool {
 func (m *matcher) matchesExact(hostname string) bool {
 	return hostname == m.tpl
 }
+
+// MatchHost reports whether hostname matches pattern, under the syntax of Router.HandleConnectHost. The pattern
+// "*" matches every hostname.
+func MatchHost(pattern, hostname string) bool {
+	if pattern == "*" {
+		return true
+	}
+	m := matcher{tpl: pattern}
+	return m.matches(hostname)
+}

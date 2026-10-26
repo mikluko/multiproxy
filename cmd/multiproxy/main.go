@@ -20,6 +20,7 @@ import (
 
 	"sarak.sh/mikluko/multiproxy/pkg/handlers"
 	"sarak.sh/mikluko/multiproxy/pkg/issuer"
+	"sarak.sh/mikluko/multiproxy/pkg/middleware/headers"
 	"sarak.sh/mikluko/multiproxy/pkg/middleware/log"
 	"sarak.sh/mikluko/multiproxy/pkg/middleware/via"
 	"sarak.sh/mikluko/multiproxy/pkg/router"
@@ -39,6 +40,7 @@ type config struct {
 	caName          string
 	caOrg           string
 	printCA         bool
+	headerRules     []headers.Rule
 }
 
 // parseFlags reads the command line. With neither -mitm nor -tunnel given, every CONNECT host is tunnelled.
@@ -62,6 +64,8 @@ func parseFlags(args []string, output io.Writer) (config, error) {
 	fs.StringVar(&cfg.caName, "ca-name", issuer.DefaultIssuerRootTmpl.Subject.CommonName, "common name of a generated CA")
 	fs.StringVar(&cfg.caOrg, "ca-org", issuer.DefaultIssuerRootTmpl.Subject.Organization[0], "organization of a generated CA")
 	fs.BoolVar(&cfg.printCA, "print-ca", false, "print the CA certificate as PEM and exit")
+	fs.Var(headerFlag{rules: &cfg.headerRules}, "set-header", "HOST=Name: value sets a header on plain-HTTP and MITM requests to HOST; repeatable")
+	fs.Var(headerFlag{rules: &cfg.headerRules, del: true}, "del-header", "HOST=Name strips a header from plain-HTTP and MITM requests to HOST; repeatable")
 	if err := fs.Parse(args); err != nil {
 		return config{}, err
 	}
@@ -124,6 +128,9 @@ func newHandler(cfg config, ca *tls.Certificate, accessw, serverw io.Writer) (ht
 	httpMiddleware := []alice.Constructor{lmw, named("http")}
 	if !cfg.noVia {
 		httpMiddleware = append(httpMiddleware, via.Via)
+	}
+	if len(cfg.headerRules) > 0 {
+		httpMiddleware = append(httpMiddleware, headers.Rewrite(cfg.headerRules...))
 	}
 	mux := &router.Router{
 		Default: alice.New(httpMiddleware...).Then(&handlers.HTTPHandler{

@@ -19,6 +19,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"sarak.sh/mikluko/multiproxy/pkg/issuer"
+	"sarak.sh/mikluko/multiproxy/pkg/middleware/headers"
 )
 
 func TestParseFlags(t *testing.T) {
@@ -55,6 +56,28 @@ func TestParseFlags(t *testing.T) {
 		_, err := parseFlags([]string{"-ca-cert", "ca.pem"}, io.Discard)
 		require.ErrorContains(t, err, "-ca-key")
 	})
+	t.Run("header rules keep their order", func(t *testing.T) {
+		cfg, err := parseFlags([]string{"-set-header", "a.test=X-A: 1", "-del-header", "b.test=X-B", "-set-header", "c.test= x-c :  2 "}, io.Discard)
+		require.NoError(t, err)
+		require.Equal(t, []headers.Rule{
+			{Host: "a.test", Set: http.Header{"X-A": {"1"}}},
+			{Host: "b.test", Delete: []string{"X-B"}},
+			{Host: "c.test", Set: http.Header{"X-C": {"2"}}},
+		}, cfg.headerRules)
+	})
+	for _, bad := range [][]string{
+		{"-set-header", "X-A: 1"},
+		{"-set-header", "=X-A: 1"},
+		{"-set-header", "a.test=X-A"},
+		{"-set-header", "a.test=Bad Name: 1"},
+		{"-del-header", "a.test="},
+		{"-del-header", "a.test=X:A"},
+	} {
+		t.Run("rejects "+bad[0]+" "+bad[1], func(t *testing.T) {
+			_, err := parseFlags(bad, io.Discard)
+			require.ErrorContains(t, err, bad[0])
+		})
+	}
 	t.Run("help", func(t *testing.T) {
 		_, err := parseFlags([]string{"-h"}, io.Discard)
 		require.ErrorIs(t, err, flag.ErrHelp)
@@ -107,6 +130,22 @@ func TestNewHandler(t *testing.T) {
 		rs := get(t, proxy(t, "-tunnel", "127.0.0.1"), backend.URL)
 		require.Equal(t, http.StatusOK, rs.StatusCode)
 	})
+	t.Run("-set-header on plain HTTP", func(t *testing.T) {
+		rs := get(t, proxy(t, "-set-header", "127.0.0.1=X-Test: yes"), backend.URL)
+		require.Equal(t, "yes", rs.Header.Get("X-Seen-Test"))
+	})
+	t.Run("-set-header on an intercepted request", func(t *testing.T) {
+		rs := get(t, proxy(t, "-mitm", "127.0.0.1", "-set-header", "127.0.0.1=X-Test: yes"), tlsBackend.URL)
+		require.Equal(t, "yes", rs.Header.Get("X-Seen-Test"))
+	})
+	t.Run("-set-header on another host", func(t *testing.T) {
+		rs := get(t, proxy(t, "-set-header", "example.com=X-Test: yes"), backend.URL)
+		require.Empty(t, rs.Header.Get("X-Seen-Test"))
+	})
+	t.Run("-del-header", func(t *testing.T) {
+		rs := get(t, proxy(t, "-del-header", "*=Via"), backend.URL)
+		require.Empty(t, rs.Header.Get("X-Seen-Via"))
+	})
 	t.Run("two fallback handlers", func(t *testing.T) {
 		cfg, err := parseFlags([]string{"-mitm", "*", "-tunnel", "*"}, io.Discard)
 		require.NoError(t, err)
@@ -115,9 +154,10 @@ func TestNewHandler(t *testing.T) {
 	})
 }
 
-// echoVia answers 200 and reports the Via header it received as X-Seen-Via.
+// echoVia answers 200 and reports the Via and X-Test headers it received as X-Seen-Via and X-Seen-Test.
 func echoVia(rw http.ResponseWriter, rq *http.Request) {
 	rw.Header().Set("X-Seen-Via", rq.Header.Get("Via"))
+	rw.Header().Set("X-Seen-Test", rq.Header.Get("X-Test"))
 	rw.WriteHeader(http.StatusOK)
 }
 
