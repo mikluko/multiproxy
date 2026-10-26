@@ -11,8 +11,6 @@ import (
 	"sync"
 	"time"
 
-	"go.uber.org/zap"
-
 	"sarak.sh/mikluko/multiproxy/pkg/middleware/log"
 )
 
@@ -74,7 +72,7 @@ func (s *Tunnel) ServeHTTP(rw http.ResponseWriter, rq *http.Request) {
 	conn, bufrw, err := hj.Hijack() // client connection and buffered read-writer
 	if err != nil {
 		s.httpError(rw, rq, http.StatusInternalServerError)
-		log.Warn(rq, "failed to hijack client connection", zap.Error(err))
+		log.Warn(rq, "failed to hijack client connection", "error", err)
 		return
 	}
 	defer conn.Close()
@@ -90,14 +88,14 @@ func (s *Tunnel) ServeHTTP(rw http.ResponseWriter, rq *http.Request) {
 		defer wg.Done()
 		_, err := s.copy(u, bufrw)
 		if err != nil {
-			log.Debug(rq, "client -> upstream copy error", zap.Error(err))
+			log.Debug(rq, "client -> upstream copy error", "error", err)
 		}
 	}()
 	go func() {
 		defer wg.Done()
 		n, err := s.copy(bufrw, u)
 		if err != nil {
-			log.Debug(rq, "upstream -> client copy error", zap.Error(err))
+			log.Debug(rq, "upstream -> client copy error", "error", err)
 		}
 		log.WithContentLength(rq, n)
 	}()

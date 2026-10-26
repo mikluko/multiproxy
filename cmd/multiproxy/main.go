@@ -9,6 +9,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
@@ -16,8 +17,6 @@ import (
 	"time"
 
 	"github.com/justinas/alice"
-	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
 
 	"sarak.sh/mikluko/multiproxy/pkg/handlers"
 	"sarak.sh/mikluko/multiproxy/pkg/issuer"
@@ -112,13 +111,13 @@ func writeCA(w io.Writer, ca *tls.Certificate) error {
 	return pem.Encode(w, &pem.Block{Type: "CERTIFICATE", Bytes: ca.Certificate[0]})
 }
 
-// newHandler builds the proxy described by cfg, signing MITM certificates with ca, writing access logs to accessw
-// and server logs to serverw.
-func newHandler(cfg config, ca *tls.Certificate, accessw, serverw io.Writer) (http.Handler, error) {
+// newHandler builds the proxy described by cfg, signing MITM certificates with ca, logging each request through
+// access and server.
+func newHandler(cfg config, ca *tls.Certificate, access, server *slog.Logger) (http.Handler, error) {
 	if cfg.noAccessLog {
-		accessw = io.Discard
+		access = slog.New(slog.DiscardHandler)
 	}
-	lmw := log.Middleware(accessw, serverw, zapcore.InfoLevel)
+	lmw := log.Middleware(access, server)
 
 	named := func(name string) alice.Constructor {
 		return func(next http.Handler) http.Handler {
@@ -182,13 +181,10 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 
-	l := zap.New(zapcore.NewCore(
-		zapcore.NewConsoleEncoder(log.DefaultServerLogEncoderConfig()),
-		zapcore.AddSync(stderr),
-		zapcore.InfoLevel,
-	)).Named("cli")
+	access, server := newLoggers(stdout, stderr)
+	l := server.With("logger", "cli")
 	fail := func(err error) int {
-		l.Error("", zap.Error(err))
+		l.Error("exiting", "error", err)
 		return 1
 	}
 
@@ -203,7 +199,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 0
 	}
 
-	h, err := newHandler(cfg, ca, stdout, stderr)
+	h, err := newHandler(cfg, ca, access, server)
 	if err != nil {
 		return fail(err)
 	}
@@ -220,12 +216,26 @@ func run(args []string, stdout, stderr io.Writer) int {
 			return fail(err)
 		}
 		defer socksListener.Close()
-		l.Info("starting SOCKS5", zap.String("listen", socksListener.Addr().String()))
+		l.Info("starting SOCKS5", "listen", socksListener.Addr().String())
 		go func() { errc <- (&socks5.Server{Handler: h}).Serve(socksListener) }()
 	}
-	l.Info("starting", zap.String("listen", httpListener.Addr().String()))
+	l.Info("starting", "listen", httpListener.Addr().String())
 	go func() { errc <- http.Serve(httpListener, h) }()
 	return fail(<-errc)
+}
+
+// newLoggers returns the access logger, writing JSON records without level or message to stdout, and the server
+// logger, writing JSON records to stderr.
+func newLoggers(stdout, stderr io.Writer) (access, server *slog.Logger) {
+	dropLevelAndMessage := func(groups []string, a slog.Attr) slog.Attr {
+		if len(groups) == 0 && (a.Key == slog.LevelKey || a.Key == slog.MessageKey) {
+			return slog.Attr{}
+		}
+		return a
+	}
+	access = slog.New(slog.NewJSONHandler(stdout, &slog.HandlerOptions{ReplaceAttr: dropLevelAndMessage}))
+	server = slog.New(slog.NewJSONHandler(stderr, nil))
+	return access, server
 }
 
 func registerHandler(mux *router.Router, handler http.Handler, hostnames string) error {
