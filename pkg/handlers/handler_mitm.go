@@ -8,7 +8,6 @@ import (
 	"net"
 	"net/http"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	arc "github.com/hashicorp/golang-lru/arc/v2"
@@ -74,7 +73,7 @@ func (s *MITMHandler) ServeHTTP(rw http.ResponseWriter, rq *http.Request) {
 		return
 	}
 
-	accept := connectAcceptor(rw)
+	accept := connectAcceptor(rw, rq)
 	if accept == nil {
 		s.httpError(rw, http.StatusInternalServerError)
 		panic("underlying http.ResponseWriter MUST implement http.Hijacker or ConnectAcceptor")
@@ -95,13 +94,7 @@ func (s *MITMHandler) ServeHTTP(rw http.ResponseWriter, rq *http.Request) {
 	}
 	defer conn.Close()
 
-	client := &mitmCounterConn{Conn: newBufferedConn(conn, bufrw.Reader)}
-	defer func() {
-		log.WithStatusCode(rq, http.StatusOK)
-		log.WithContentLength(rq, int(client.bytesWritten.Load()))
-	}()
-
-	tlsconn := tls.Server(client, &tls.Config{
+	tlsconn := tls.Server(newBufferedConn(conn, bufrw.Reader), &tls.Config{
 		Certificates: []tls.Certificate{*cert},
 	})
 	if err := tlsconn.Handshake(); err != nil {
@@ -221,16 +214,4 @@ func (s *MITMHandler) certForRequest(rq *http.Request) (*tls.Certificate, error)
 	}
 
 	return entry.cert, nil
-}
-
-// mitmCounterConn counts the bytes written to the client.
-type mitmCounterConn struct {
-	net.Conn
-	bytesWritten atomic.Int64
-}
-
-func (c *mitmCounterConn) Write(p []byte) (int, error) {
-	n, err := c.Conn.Write(p)
-	c.bytesWritten.Add(int64(n))
-	return n, err
 }

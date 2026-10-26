@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/justinas/alice"
@@ -121,4 +122,52 @@ func TestLogNested(t *testing.T) {
 	assert.Contains(t, inner.String(), `"inner-field":"yes"`)
 	assert.Contains(t, inner.String(), `"parent-seq"`)
 	assert.NotContains(t, inner.String(), `"outer-only-field":"yes"`)
+}
+
+func TestLogObservesTheResponse(t *testing.T) {
+	for name, c := range map[string]struct {
+		handler http.HandlerFunc
+		want    []string
+	}{
+		"status and body": {
+			func(rw http.ResponseWriter, _ *http.Request) {
+				rw.WriteHeader(http.StatusCreated)
+				_, _ = io.WriteString(rw, "hello")
+			},
+			[]string{`"status":201`, `"content-length":5`},
+		},
+		"body alone is a 200": {
+			func(rw http.ResponseWriter, _ *http.Request) { _, _ = io.WriteString(rw, "hi") },
+			[]string{`"status":200`, `"content-length":2`},
+		},
+		"copied body": {
+			func(rw http.ResponseWriter, _ *http.Request) {
+				_, _ = io.Copy(rw, strings.NewReader("streamed"))
+			},
+			[]string{`"status":200`, `"content-length":8`},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			var access bytes.Buffer
+			h := log.Middleware(jsonLogger(&access), jsonLogger(io.Discard))(c.handler)
+			h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/", nil))
+			for _, w := range c.want {
+				assert.Contains(t, access.String(), w)
+			}
+		})
+	}
+}
+
+func TestLogKeepsWriterInterfaces(t *testing.T) {
+	h := log.Middleware(jsonLogger(io.Discard), jsonLogger(io.Discard))(http.HandlerFunc(func(rw http.ResponseWriter, _ *http.Request) {
+		_, isFlusher := rw.(http.Flusher)
+		_, isHijacker := rw.(http.Hijacker)
+		assert.True(t, isFlusher)
+		assert.True(t, isHijacker)
+	}))
+	s := httptest.NewServer(h)
+	defer s.Close()
+	rs, err := http.Get(s.URL)
+	require.NoError(t, err)
+	_ = rs.Body.Close()
 }

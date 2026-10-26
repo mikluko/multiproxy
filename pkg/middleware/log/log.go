@@ -3,12 +3,14 @@ package log
 
 import (
 	"context"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
 	"sync/atomic"
 	"time"
 
+	"github.com/felixge/httpsnoop"
 	"github.com/google/uuid"
 )
 
@@ -29,6 +31,10 @@ type ctxObj struct {
 // Middleware gives each request an access logger derived from access and a server logger derived from server, and
 // writes one access record through the former when the request completes. A request served inside another, as one
 // intercepted from a CONNECT session, records the sequence and identifier of the request it is served in.
+//
+// The access record carries the status and the number of body bytes the handler wrote through the ResponseWriter.
+// Bytes written to a hijacked connection pass it by, so a handler that hijacks records them with WithStatusCode and
+// WithContentLength. The ResponseWriter passed on keeps the optional interfaces of the one received.
 //
 // Every record is written with the request's context.
 func Middleware(access, server *slog.Logger) func(http.Handler) http.Handler {
@@ -56,14 +62,21 @@ func Middleware(access, server *slog.Logger) func(http.Handler) http.Handler {
 			}
 
 			ctx := context.WithValue(rq.Context(), ctxKey{}, obj)
-			next.ServeHTTP(rw, rq.WithContext(ctx))
+			next.ServeHTTP(observe(rw, obj), rq.WithContext(ctx))
 
 			d := time.Since(t)
-			obj.access.LogAttrs(ctx, slog.LevelInfo, "",
-				slog.String("logger", "access"+obj.name),
+			attrs := []slog.Attr{slog.String("logger", "access"+obj.name)}
+			if obj.status != 0 {
+				attrs = append(attrs, slog.Int("status", obj.status))
+			}
+			if obj.status != 0 || obj.contentLength != 0 {
+				attrs = append(attrs, slog.Int("content-length", obj.contentLength))
+			}
+			attrs = append(attrs,
 				slog.Duration("duration", d),
 				slog.String("duration-human", d.Round(time.Millisecond).String()),
 			)
+			obj.access.LogAttrs(ctx, slog.LevelInfo, "", attrs...)
 		})
 	}
 }
@@ -74,6 +87,40 @@ func Log(next http.Handler) http.Handler {
 		slog.New(slog.NewJSONHandler(os.Stdout, nil)),
 		slog.New(slog.NewJSONHandler(os.Stderr, nil)),
 	)(next)
+}
+
+// observe wraps rw so that the status and body bytes the handler writes are recorded in obj.
+func observe(rw http.ResponseWriter, obj *ctxObj) http.ResponseWriter {
+	return httpsnoop.Wrap(rw, httpsnoop.Hooks{
+		WriteHeader: func(next httpsnoop.WriteHeaderFunc) httpsnoop.WriteHeaderFunc {
+			return func(code int) {
+				if obj.status == 0 {
+					obj.status = code
+				}
+				next(code)
+			}
+		},
+		Write: func(next httpsnoop.WriteFunc) httpsnoop.WriteFunc {
+			return func(p []byte) (int, error) {
+				if obj.status == 0 {
+					obj.status = http.StatusOK
+				}
+				n, err := next(p)
+				obj.contentLength += n
+				return n, err
+			}
+		},
+		ReadFrom: func(next httpsnoop.ReadFromFunc) httpsnoop.ReadFromFunc {
+			return func(r io.Reader) (int64, error) {
+				if obj.status == 0 {
+					obj.status = http.StatusOK
+				}
+				n, err := next(r)
+				obj.contentLength += int(n)
+				return n, err
+			}
+		},
+	})
 }
 
 func fromRequest(rq *http.Request) *ctxObj {
@@ -112,17 +159,16 @@ func Named(rq *http.Request, s string) {
 	obj.name += "." + s
 }
 
-// WithStatusCode records the response status code in the access logger of the request.
+// WithStatusCode records status as the response status code of the request, replacing what was observed.
 func WithStatusCode(rq *http.Request, status int) {
 	obj := fromRequest(rq)
 	if obj == nil {
 		return
 	}
 	obj.status = status
-	obj.access = obj.access.With("status", status)
 }
 
-// StatusCode returns the status code recorded by WithStatusCode, or 0.
+// StatusCode returns the response status code observed or recorded with WithStatusCode, or 0.
 func StatusCode(rq *http.Request) int {
 	obj := fromRequest(rq)
 	if obj == nil {
@@ -131,17 +177,16 @@ func StatusCode(rq *http.Request) int {
 	return obj.status
 }
 
-// WithContentLength records the response content length in the access logger of the request.
+// WithContentLength records n as the number of response bytes of the request, replacing what was observed.
 func WithContentLength(rq *http.Request, n int) {
 	obj := fromRequest(rq)
 	if obj == nil {
 		return
 	}
 	obj.contentLength = n
-	obj.access = obj.access.With("content-length", n)
 }
 
-// ContentLength returns the content length recorded by WithContentLength, or 0.
+// ContentLength returns the number of response bytes observed or recorded with WithContentLength, or 0.
 func ContentLength(rq *http.Request) int {
 	obj := fromRequest(rq)
 	if obj == nil {
