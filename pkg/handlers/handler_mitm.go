@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/url"
 	"sync"
+	"time"
 
 	arc "github.com/hashicorp/golang-lru/arc/v2"
 	"go.uber.org/zap"
@@ -35,7 +36,8 @@ type MITMHandler struct {
 	// If Issuer is nil, issuer.SelfSignedCA will be used.
 	Issuer issuer.Issuer
 
-	// CertCacheSize specifies the size of certificate cache used by the proxy.
+	// CertCacheSize specifies the size of certificate cache used by the proxy. A cached certificate past its
+	// NotAfter is issued again.
 	//
 	// If CertCacheSize is 0, platform-specific max int value will be used.
 	CertCacheSize int
@@ -176,7 +178,7 @@ func (s *MITMHandler) certForRequest(rq *http.Request) (*tls.Certificate, error)
 
 	s.certCacheMux.Unlock()
 
-	if entry.cert == nil {
+	if entry.cert == nil || !time.Now().Before(entry.cert.Leaf.NotAfter) {
 		entry.cert, err = s.Issuer.Issue(cn, dnsnames, ipaddresses)
 		if err != nil {
 			return nil, err

@@ -1,12 +1,16 @@
 package issuer
 
 import (
+	"crypto"
+	"crypto/ecdsa"
+	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
+	"fmt"
 	"io"
 	"math/big"
 	"net"
@@ -26,10 +30,21 @@ type SelfSignedCA struct {
 	// If nil, a self-signed cert will be generated.
 	Cert *tls.Certificate
 
-	// BitSize defines bit size for issued certificate keys generation.
+	// KeyAlgorithm selects the algorithm of issued certificate keys: x509.RSA, or x509.ECDSA for P-256.
+	// Issue fails on any other value.
+	//
+	// If 0, x509.RSA will be used.
+	KeyAlgorithm x509.PublicKeyAlgorithm
+
+	// BitSize defines bit size for issued RSA keys.
 	//
 	// If 0, DefaultIssuerBitSize will be used.
 	BitSize int
+
+	// Validity is how long an issued certificate stays valid.
+	//
+	// If 0, DefaultIssuerValidity will be used.
+	Validity time.Duration
 
 	// RootBitSize defines bit size for self-signed root certificate key generation.
 	//
@@ -58,38 +73,53 @@ type SelfSignedCA struct {
 func (ca *SelfSignedCA) Issue(cn string, dnsnames []string, ipaddresses []net.IP) (*tls.Certificate, error) {
 	ca.once.Do(ca.init)
 
+	key, err := ca.generateKey()
+	if err != nil {
+		return nil, err
+	}
+	serial, err := rand.Int(ca.Rand, serialLimit)
+	if err != nil {
+		return nil, err
+	}
+
+	now := time.Now()
 	tmpl := *ca.Tmpl
+	tmpl.SerialNumber = serial
 	tmpl.Subject.CommonName = cn
-	tmpl.NotBefore = time.Now()
-	tmpl.NotAfter = time.Now().AddDate(10, 0, 0)
+	tmpl.NotBefore = now.Add(-clockSkew)
+	tmpl.NotAfter = now.Add(ca.Validity)
 	tmpl.KeyUsage = x509.KeyUsageDigitalSignature
 	tmpl.ExtKeyUsage = []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth, x509.ExtKeyUsageServerAuth}
 	tmpl.DNSNames = dnsnames
 	tmpl.IPAddresses = ipaddresses
 
-	key, err := rsa.GenerateKey(ca.Rand, 1024)
+	der, err := x509.CreateCertificate(ca.Rand, &tmpl, ca.Cert.Leaf, key.Public(), ca.Cert.PrivateKey)
 	if err != nil {
 		return nil, err
 	}
-
-	der, err := x509.CreateCertificate(ca.Rand, &tmpl, ca.Cert.Leaf, &key.PublicKey, ca.Cert.PrivateKey)
+	leaf, err := x509.ParseCertificate(der)
 	if err != nil {
 		return nil, err
 	}
-
-	cert, err := tls.X509KeyPair(
-		pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}),
-		pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key)}),
-	)
-	if err != nil {
-		return nil, err
-	}
-	cert.Leaf, err = x509.ParseCertificate(cert.Certificate[0])
-	if err != nil {
-		return nil, err
-	}
-	return &cert, nil
+	return &tls.Certificate{Certificate: [][]byte{der}, PrivateKey: key, Leaf: leaf}, nil
 }
+
+func (ca *SelfSignedCA) generateKey() (crypto.Signer, error) {
+	switch ca.KeyAlgorithm {
+	case x509.RSA:
+		return rsa.GenerateKey(ca.Rand, ca.BitSize)
+	case x509.ECDSA:
+		return ecdsa.GenerateKey(elliptic.P256(), ca.Rand)
+	default:
+		return nil, fmt.Errorf("issuer: unsupported key algorithm %s", ca.KeyAlgorithm)
+	}
+}
+
+// serialLimit bounds serial numbers to the 20 octets RFC 5280 allows.
+var serialLimit = new(big.Int).Lsh(big.NewInt(1), 159)
+
+// clockSkew backdates NotBefore so that a client whose clock runs slightly behind accepts a fresh certificate.
+const clockSkew = time.Hour
 
 func (ca *SelfSignedCA) init() {
 	if ca.Rand == nil {
@@ -101,8 +131,14 @@ func (ca *SelfSignedCA) init() {
 	if ca.RootTmpl == nil {
 		ca.RootTmpl = &DefaultIssuerRootTmpl
 	}
+	if ca.KeyAlgorithm == x509.UnknownPublicKeyAlgorithm {
+		ca.KeyAlgorithm = x509.RSA
+	}
 	if ca.BitSize == 0 {
 		ca.BitSize = DefaultIssuerBitSize
+	}
+	if ca.Validity == 0 {
+		ca.Validity = DefaultIssuerValidity
 	}
 	if ca.RootBitSize == 0 {
 		ca.RootBitSize = DefaultIssuerRootBitSize
@@ -142,8 +178,11 @@ func (ca *SelfSignedCA) initRootCert() {
 // DefaultIssuerRootBitSize defines default bit size for a self-signed root cert.
 const DefaultIssuerRootBitSize = 2048
 
-// DefaultIssuerBitSize defines default bit size for issued certs.
-const DefaultIssuerBitSize = 1024
+// DefaultIssuerBitSize defines default bit size for issued RSA keys.
+const DefaultIssuerBitSize = 2048
+
+// DefaultIssuerValidity is the default validity of issued certificates.
+const DefaultIssuerValidity = 30 * 24 * time.Hour
 
 var (
 	// DefaultIssuerRootTmpl is the default template for self-signed root CA certificate.
