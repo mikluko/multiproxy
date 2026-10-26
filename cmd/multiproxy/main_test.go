@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -27,6 +28,12 @@ import (
 	"sarak.sh/mikluko/multiproxy/pkg/middleware/headers"
 	"sarak.sh/mikluko/multiproxy/pkg/socks5"
 )
+
+func TestMain(m *testing.M) {
+	// Tests that need the SDK enable it themselves; the rest must not export to a collector on localhost.
+	_ = os.Setenv("OTEL_SDK_DISABLED", "true")
+	os.Exit(m.Run())
+}
 
 func TestParseFlags(t *testing.T) {
 	t.Run("defaults", func(t *testing.T) {
@@ -367,9 +374,10 @@ func freeAddr(t *testing.T) string {
 	return addr
 }
 
-func TestNewLoggers(t *testing.T) {
+func TestNewLogHandlers(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	access, server := newLoggers(&stdout, &stderr)
+	accessHandler, serverHandler := newLogHandlers(&stdout, &stderr)
+	access, server := slog.New(accessHandler), slog.New(serverHandler)
 	access.Info("", "url", "http://example.com/")
 	server.Warn("something", "error", "boom")
 

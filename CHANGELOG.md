@@ -20,6 +20,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `router.MatchHost` matches a hostname against a host pattern.
 - `-socks` opens a SOCKS5 listener routed by the same `-mitm` and `-tunnel` rules as `CONNECT` requests.
 - The `socks5` package serves SOCKS5 connections as `CONNECT` requests to an `http.Handler`.
+- Traces, metrics and logs are exported through the OpenTelemetry SDK, configured by the standard `OTEL_*` environment variables and exporting over OTLP to localhost by default.
+- Log records written while a request is traced carry `trace_id` and `span_id`, and `log.TraceHandler` adds them to any `slog.Handler`.
+- The command stops on SIGINT and SIGTERM, flushing telemetry before it exits.
 
 ### Changed
 
@@ -28,6 +31,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Breaking:** `router.Router` answers a plain-HTTP request with 403 unless a host pattern matches its host or `Connect` is set, so `-mitm` and `-tunnel` restrict plain HTTP as well as `CONNECT`.
 - **Breaking:** the `log` middleware package is built on `log/slog`: `log.Middleware` takes an access and a server `*slog.Logger`, and the helpers take `slog` key-value arguments instead of `zap.Field`.
 - Logs are written by `log/slog`: JSON records carry `time` instead of `ts`, and server records carry upper-case levels.
+- With telemetry enabled, an upstream request carries the proxy's span in its `traceparent` header in place of the client's.
 
 ### Removed
 
