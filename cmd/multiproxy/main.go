@@ -65,8 +65,8 @@ func parseFlags(args []string, output io.Writer) (config, error) {
 	fs.DurationVar(&cfg.leafValidity, "leaf-validity", issuer.DefaultIssuerValidity, "validity of leaf certificates")
 	fs.StringVar(&cfg.caCert, "ca-cert", "", "PEM file of the proxy CA certificate, which signs leaf certificates; created with -ca-key when neither exists")
 	fs.StringVar(&cfg.caKey, "ca-key", "", "PEM file of the CA private key")
-	fs.StringVar(&cfg.caName, "ca-name", issuer.DefaultIssuerRootTmpl.Subject.CommonName, "common name of a generated CA")
-	fs.StringVar(&cfg.caOrg, "ca-org", issuer.DefaultIssuerRootTmpl.Subject.Organization[0], "organization of a generated CA")
+	fs.StringVar(&cfg.caName, "ca-name", issuer.DefaultIssuerCATmpl.Subject.CommonName, "common name of a generated CA")
+	fs.StringVar(&cfg.caOrg, "ca-org", issuer.DefaultIssuerCATmpl.Subject.Organization[0], "organization of a generated CA")
 	fs.BoolVar(&cfg.printCA, "print-ca", false, "print the CA certificate as PEM and exit")
 	fs.StringVar(&cfg.upstreamCA, "upstream-ca", "", "PEM file of CA certificates to trust for intercepted upstreams, beside the system roots")
 	fs.BoolVar(&cfg.upstreamInsec, "upstream-insecure", false, "do not verify the certificates of intercepted upstreams")
@@ -99,9 +99,9 @@ func parseFlags(args []string, output io.Writer) (config, error) {
 // loadCA returns the proxy CA, which signs leaf certificates: read from -ca-cert and -ca-key, created there when neither
 // exists, or generated in memory when neither flag is given.
 func loadCA(cfg config) (*tls.Certificate, error) {
-	tmpl := issuer.RootTemplate(cfg.caName, cfg.caOrg, caValidity)
+	tmpl := issuer.CATemplate(cfg.caName, cfg.caOrg, caValidity)
 	if cfg.caCert == "" {
-		return issuer.NewRoot(tmpl, issuer.DefaultIssuerRootBitSize, rand.Reader)
+		return issuer.NewCA(tmpl, issuer.DefaultIssuerCABitSize, rand.Reader)
 	}
 	return issuer.LoadOrCreate(cfg.caCert, cfg.caKey, tmpl)
 }

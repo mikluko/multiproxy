@@ -43,21 +43,21 @@ func get(t *testing.T, c *http.Client, target string) *http.Response {
 }
 
 func TestNew(t *testing.T) {
-	backend := httptest.NewServer(http.HandlerFunc(echo))
-	defer backend.Close()
-	tlsBackend := httptest.NewTLSServer(http.HandlerFunc(echo))
-	defer tlsBackend.Close()
+	upstream := httptest.NewServer(http.HandlerFunc(echo))
+	defer upstream.Close()
+	tlsUpstream := httptest.NewTLSServer(http.HandlerFunc(echo))
+	defer tlsUpstream.Close()
 
 	t.Run("with no patterns, every host is tunnelled", func(t *testing.T) {
 		c := start(t, proxy.Config{})
-		require.Equal(t, http.StatusOK, get(t, c, backend.URL).StatusCode)
-		rs := get(t, c, tlsBackend.URL)
-		require.True(t, rs.TLS.PeerCertificates[0].Equal(tlsBackend.Certificate()))
+		require.Equal(t, http.StatusOK, get(t, c, upstream.URL).StatusCode)
+		rs := get(t, c, tlsUpstream.URL)
+		require.True(t, rs.TLS.PeerCertificates[0].Equal(tlsUpstream.Certificate()))
 	})
 	t.Run("a MITM pattern intercepts", func(t *testing.T) {
 		ca := &issuer.SelfSignedCA{}
-		c := start(t, proxy.Config{MITM: []string{"127.0.0.1"}, Issuer: ca, Transport: tlsBackend.Client().Transport})
-		rs := get(t, c, tlsBackend.URL)
+		c := start(t, proxy.Config{MITM: []string{"127.0.0.1"}, Issuer: ca, Transport: tlsUpstream.Client().Transport})
+		rs := get(t, c, tlsUpstream.URL)
 		require.Equal(t, ca.Cert.Leaf.Subject.CommonName, rs.TLS.PeerCertificates[0].Issuer.CommonName)
 	})
 	t.Run("middleware reaches plain and intercepted requests", func(t *testing.T) {
@@ -70,14 +70,14 @@ func TestNew(t *testing.T) {
 		c := start(t, proxy.Config{
 			MITM:       []string{"127.0.0.1"},
 			Middleware: []func(http.Handler) http.Handler{setTest},
-			Transport:  tlsBackend.Client().Transport,
+			Transport:  tlsUpstream.Client().Transport,
 		})
-		require.Equal(t, "yes", get(t, c, backend.URL).Header.Get("X-Seen-Test"))
-		require.Equal(t, "yes", get(t, c, tlsBackend.URL).Header.Get("X-Seen-Test"))
+		require.Equal(t, "yes", get(t, c, upstream.URL).Header.Get("X-Seen-Test"))
+		require.Equal(t, "yes", get(t, c, tlsUpstream.URL).Header.Get("X-Seen-Test"))
 	})
 	t.Run("a host no pattern admits is refused", func(t *testing.T) {
 		c := start(t, proxy.Config{Tunnel: []string{"example.com"}})
-		require.Equal(t, http.StatusForbidden, get(t, c, backend.URL).StatusCode)
+		require.Equal(t, http.StatusForbidden, get(t, c, upstream.URL).StatusCode)
 	})
 	t.Run("two fallbacks", func(t *testing.T) {
 		_, err := proxy.New(proxy.Config{MITM: []string{"*"}, Tunnel: []string{"*"}})

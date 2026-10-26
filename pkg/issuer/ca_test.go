@@ -13,9 +13,9 @@ import (
 	"sarak.sh/mikluko/multiproxy/pkg/issuer"
 )
 
-func TestRootTemplate(t *testing.T) {
-	tmpl := issuer.RootTemplate("Test Root", "Test Org", 24*time.Hour)
-	require.Equal(t, "Test Root", tmpl.Subject.CommonName)
+func TestCATemplate(t *testing.T) {
+	tmpl := issuer.CATemplate("Test CA", "Test Org", 24*time.Hour)
+	require.Equal(t, "Test CA", tmpl.Subject.CommonName)
 	require.Equal(t, []string{"Test Org"}, tmpl.Subject.Organization)
 	require.True(t, tmpl.IsCA)
 	require.True(t, tmpl.BasicConstraintsValid)
@@ -24,14 +24,14 @@ func TestRootTemplate(t *testing.T) {
 	require.WithinDuration(t, time.Now().Add(24*time.Hour), tmpl.NotAfter, time.Minute)
 }
 
-func TestNewRoot(t *testing.T) {
-	tmpl := issuer.RootTemplate("Test Root", "Test Org", 24*time.Hour)
-	a, err := issuer.NewRoot(tmpl, 2048, rand.Reader)
+func TestNewCA(t *testing.T) {
+	tmpl := issuer.CATemplate("Test CA", "Test Org", 24*time.Hour)
+	a, err := issuer.NewCA(tmpl, 2048, rand.Reader)
 	require.NoError(t, err)
-	b, err := issuer.NewRoot(tmpl, 2048, rand.Reader)
+	b, err := issuer.NewCA(tmpl, 2048, rand.Reader)
 	require.NoError(t, err)
 
-	require.Equal(t, "Test Root", a.Leaf.Subject.CommonName)
+	require.Equal(t, "Test CA", a.Leaf.Subject.CommonName)
 	require.True(t, a.Leaf.IsCA)
 	require.Equal(t, x509.SHA256WithRSA, a.Leaf.SignatureAlgorithm)
 	require.NotEqual(t, a.Leaf.SerialNumber, b.Leaf.SerialNumber)
@@ -39,7 +39,7 @@ func TestNewRoot(t *testing.T) {
 }
 
 func TestLoadOrCreate(t *testing.T) {
-	tmpl := issuer.RootTemplate("Test Root", "Test Org", 24*time.Hour)
+	tmpl := issuer.CATemplate("Test CA", "Test Org", 24*time.Hour)
 
 	t.Run("creates, then loads the same CA", func(t *testing.T) {
 		dir := t.TempDir()
@@ -47,13 +47,13 @@ func TestLoadOrCreate(t *testing.T) {
 
 		created, err := issuer.LoadOrCreate(certFile, keyFile, tmpl)
 		require.NoError(t, err)
-		require.Equal(t, "Test Root", created.Leaf.Subject.CommonName)
+		require.Equal(t, "Test CA", created.Leaf.Subject.CommonName)
 
 		info, err := os.Stat(keyFile)
 		require.NoError(t, err)
 		require.Equal(t, os.FileMode(0o600), info.Mode().Perm())
 
-		loaded, err := issuer.LoadOrCreate(certFile, keyFile, issuer.RootTemplate("Other", "Other", time.Hour))
+		loaded, err := issuer.LoadOrCreate(certFile, keyFile, issuer.CATemplate("Other", "Other", time.Hour))
 		require.NoError(t, err)
 		require.True(t, created.Leaf.Equal(loaded.Leaf))
 
@@ -91,7 +91,7 @@ func TestLoadOrCreate(t *testing.T) {
 		require.ErrorContains(t, err, "not a CA")
 		require.NoFileExists(t, certFile)
 
-		leaf, err := issuer.NewRoot(&leafTmpl, 2048, rand.Reader)
+		leaf, err := issuer.NewCA(&leafTmpl, 2048, rand.Reader)
 		require.NoError(t, err)
 		require.NoError(t, issuer.WriteFiles(leaf, certFile, keyFile))
 		_, err = issuer.LoadOrCreate(certFile, keyFile, tmpl)
@@ -99,8 +99,8 @@ func TestLoadOrCreate(t *testing.T) {
 	})
 }
 
-func TestRootErrors(t *testing.T) {
-	tmpl := issuer.RootTemplate("Test Root", "Test Org", 24*time.Hour)
+func TestCAErrors(t *testing.T) {
+	tmpl := issuer.CATemplate("Test CA", "Test Org", 24*time.Hour)
 
 	t.Run("a missing directory", func(t *testing.T) {
 		dir := filepath.Join(t.TempDir(), "missing")
@@ -109,14 +109,14 @@ func TestRootErrors(t *testing.T) {
 	})
 	t.Run("WriteFiles refuses to overwrite", func(t *testing.T) {
 		dir := t.TempDir()
-		ca, err := issuer.NewRoot(tmpl, 2048, rand.Reader)
+		ca, err := issuer.NewCA(tmpl, 2048, rand.Reader)
 		require.NoError(t, err)
 		certFile, keyFile := filepath.Join(dir, "ca.pem"), filepath.Join(dir, "ca-key.pem")
 		require.NoError(t, issuer.WriteFiles(ca, certFile, keyFile))
 		require.ErrorIs(t, issuer.WriteFiles(ca, certFile, keyFile), os.ErrExist)
 	})
-	t.Run("NewRoot without randomness", func(t *testing.T) {
-		_, err := issuer.NewRoot(tmpl, 2048, failingReader{})
+	t.Run("NewCA without randomness", func(t *testing.T) {
+		_, err := issuer.NewCA(tmpl, 2048, failingReader{})
 		require.Error(t, err)
 	})
 }

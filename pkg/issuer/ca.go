@@ -15,8 +15,8 @@ import (
 	"time"
 )
 
-// RootTemplate returns a template for a CA certificate with the given subject, valid for validity from now.
-func RootTemplate(commonName, organization string, validity time.Duration) *x509.Certificate {
+// CATemplate returns a template for a CA certificate with the given subject, valid for validity from now.
+func CATemplate(commonName, organization string, validity time.Duration) *x509.Certificate {
 	now := time.Now()
 	return &x509.Certificate{
 		Subject: pkix.Name{
@@ -31,9 +31,9 @@ func RootTemplate(commonName, organization string, validity time.Duration) *x509
 	}
 }
 
-// NewRoot creates a self-signed certificate from tmpl with a fresh RSA key of bits size. The serial number is
+// NewCA creates a self-signed certificate from tmpl with a fresh RSA key of bits size. The serial number is
 // random, whatever tmpl carries.
-func NewRoot(tmpl *x509.Certificate, bits int, rnd io.Reader) (*tls.Certificate, error) {
+func NewCA(tmpl *x509.Certificate, bits int, rnd io.Reader) (*tls.Certificate, error) {
 	key, err := rsa.GenerateKey(rnd, bits)
 	if err != nil {
 		return nil, err
@@ -55,7 +55,7 @@ func NewRoot(tmpl *x509.Certificate, bits int, rnd io.Reader) (*tls.Certificate,
 	return &tls.Certificate{Certificate: [][]byte{der}, PrivateKey: key, Leaf: leaf}, nil
 }
 
-// LoadOrCreate reads a CA certificate and its key from PEM files. Where neither file exists, it creates a root
+// LoadOrCreate reads a CA certificate and its key from PEM files. Where neither file exists, it creates a CA
 // from tmpl and writes both. One file without the other, or a certificate that is not a CA, is an error.
 func LoadOrCreate(certFile, keyFile string, tmpl *x509.Certificate) (*tls.Certificate, error) {
 	certExists, err := exists(certFile)
@@ -77,7 +77,7 @@ func LoadOrCreate(certFile, keyFile string, tmpl *x509.Certificate) (*tls.Certif
 	if !tmpl.IsCA {
 		return nil, errors.New("issuer: template is not a CA")
 	}
-	cert, err := NewRoot(tmpl, DefaultIssuerRootBitSize, rand.Reader)
+	cert, err := NewCA(tmpl, DefaultIssuerCABitSize, rand.Reader)
 	if err != nil {
 		return nil, err
 	}

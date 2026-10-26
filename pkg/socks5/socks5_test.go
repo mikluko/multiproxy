@@ -93,14 +93,14 @@ func hostPort(t *testing.T, rawURL string) (string, int) {
 }
 
 func TestServer(t *testing.T) {
-	backend := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, _ *http.Request) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, _ *http.Request) {
 		_, _ = io.WriteString(rw, "hello")
 	}))
-	defer backend.Close()
-	tlsBackend := httptest.NewTLSServer(backend.Config.Handler)
-	defer tlsBackend.Close()
-	host, port := hostPort(t, backend.URL)
-	_, tlsPort := hostPort(t, tlsBackend.URL)
+	defer upstream.Close()
+	tlsUpstream := httptest.NewTLSServer(upstream.Config.Handler)
+	defer tlsUpstream.Close()
+	host, port := hostPort(t, upstream.URL)
+	_, tlsPort := hostPort(t, tlsUpstream.URL)
 
 	getOver := func(t *testing.T, c net.Conn, target string) string {
 		t.Helper()
@@ -119,25 +119,25 @@ func TestServer(t *testing.T) {
 	t.Run("tunnels to an IPv4 address", func(t *testing.T) {
 		c, code := dial(t, tunnel, 1, host, port)
 		require.Equal(t, byte(0), code)
-		require.Equal(t, "hello", getOver(t, c, backend.URL))
+		require.Equal(t, "hello", getOver(t, c, upstream.URL))
 	})
 	t.Run("tunnels to a domain name", func(t *testing.T) {
 		c, code := dial(t, tunnel, 3, "localhost", port)
 		require.Equal(t, byte(0), code)
-		require.Equal(t, "hello", getOver(t, c, backend.URL))
+		require.Equal(t, "hello", getOver(t, c, upstream.URL))
 	})
 	t.Run("intercepts with MITM", func(t *testing.T) {
 		ca := &issuer.SelfSignedCA{}
 		mitm := serve(t, &router.Router{Connect: &handlers.MITMHandler{
 			Issuer:  ca,
-			Handler: &handlers.HTTPHandler{Transport: tlsBackend.Client().Transport},
+			Handler: &handlers.HTTPHandler{Transport: tlsUpstream.Client().Transport},
 		}})
 		c, code := dial(t, mitm, 1, host, tlsPort)
 		require.Equal(t, byte(0), code)
 		tc := tls.Client(c, &tls.Config{InsecureSkipVerify: true, ServerName: host})
 		require.NoError(t, tc.Handshake())
 		require.Equal(t, ca.Cert.Leaf.Subject.CommonName, tc.ConnectionState().PeerCertificates[0].Issuer.CommonName)
-		require.Equal(t, "hello", getOver(t, tc, tlsBackend.URL))
+		require.Equal(t, "hello", getOver(t, tc, tlsUpstream.URL))
 	})
 	t.Run("refuses a host no rule admits", func(t *testing.T) {
 		r := &router.Router{}
