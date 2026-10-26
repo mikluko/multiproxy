@@ -92,6 +92,14 @@ func TestNewHandler(t *testing.T) {
 		_, err := client(p).Get(tlsBackend.URL)
 		require.ErrorContains(t, err, "Method Not Allowed")
 	})
+	t.Run("plain HTTP to an unlisted host is refused", func(t *testing.T) {
+		rs := get(t, proxy(t, "-mitm", "example.com"), backend.URL)
+		require.Equal(t, http.StatusForbidden, rs.StatusCode)
+	})
+	t.Run("plain HTTP to a listed host passes", func(t *testing.T) {
+		rs := get(t, proxy(t, "-tunnel", "127.0.0.1"), backend.URL)
+		require.Equal(t, http.StatusOK, rs.StatusCode)
+	})
 	t.Run("two fallback handlers", func(t *testing.T) {
 		cfg, err := parseFlags([]string{"-mitm", "*", "-tunnel", "*"}, io.Discard)
 		require.NoError(t, err)
