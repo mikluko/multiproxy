@@ -1,17 +1,13 @@
 package handlers
 
 import (
-	"context"
 	"crypto/tls"
-	"io"
 	"net"
 	"net/http"
 	"net/http/httputil"
 	"runtime"
 	"sync"
 	"time"
-
-	"sarak.sh/mikluko/multiproxy/pkg/middleware/log"
 )
 
 // HTTPHandler is a plain HTTP proxy capable of serving any method except for CONNECT.
@@ -34,8 +30,6 @@ func (s *HTTPHandler) httpError(rw http.ResponseWriter, code int) {
 	http.Error(rw, http.StatusText(code), code)
 }
 
-type httpHandlerCtxKey struct {}
-
 func (s *HTTPHandler) ServeHTTP(rw http.ResponseWriter, rq *http.Request) {
 	if rq.URL.Host == "" {
 		s.httpError(rw, http.StatusBadRequest)
@@ -51,20 +45,13 @@ func (s *HTTPHandler) ServeHTTP(rw http.ResponseWriter, rq *http.Request) {
 			s.Transport = DefaultTransport
 		}
 		s.proxy = &httputil.ReverseProxy{
-			Transport: s.Transport,
-			Director:  s.director,
-			ModifyResponse: s.modifyResponse,
+			Transport:    s.Transport,
+			Director:     s.director,
 			ErrorHandler: s.handleError,
 		}
 	})
 
-	wg := sync.WaitGroup{}
-	ctx := context.WithValue(rq.Context(), httpHandlerCtxKey{}, &wg)
-
-	s.proxy.ServeHTTP(rw, rq.WithContext(ctx))
-
-	wg.Wait()
-	return
+	s.proxy.ServeHTTP(rw, rq)
 }
 
 func (s *HTTPHandler) director(rq *http.Request) {
@@ -72,32 +59,6 @@ func (s *HTTPHandler) director(rq *http.Request) {
 	if s.NoXForwardedFor {
 		rq.Header["X-Forwarded-For"] = nil
 	}
-}
-
-func (s *HTTPHandler) modifyResponse(rs *http.Response) error {
-	rq := rs.Request
-
-	log.WithStatusCode(rq, rs.StatusCode)
-	if rs.ContentLength >= 0 {
-		log.WithContentLength(rq, int(rs.ContentLength))
-		return nil
-	}
-
-	wg := rq.Context().Value(httpHandlerCtxKey{}).(*sync.WaitGroup)
-	wg.Add(1)
-
-	var r, w = io.Pipe()
-
-	go func(dst io.WriteCloser, src io.ReadCloser) {
-		length, _ := io.Copy(dst, src)
-		_ = src.Close()
-		_ = dst.Close()
-		log.WithContentLength(rq, int(length))
-		wg.Done()
-	}(w, rs.Body)
-
-	rs.Body = r
-	return nil
 }
 
 func (s *HTTPHandler) handleError(rw http.ResponseWriter, rq *http.Request, err error) {

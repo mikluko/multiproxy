@@ -37,7 +37,6 @@ func (s *Tunnel) init() {
 }
 
 func (s *Tunnel) httpError(rw http.ResponseWriter, rq *http.Request, code int) {
-	log.WithStatusCode(rq, code)
 	http.Error(rw, http.StatusText(code), code)
 }
 
@@ -47,7 +46,7 @@ func (s *Tunnel) ServeHTTP(rw http.ResponseWriter, rq *http.Request) {
 		return
 	}
 
-	accept := connectAcceptor(rw)
+	accept := connectAcceptor(rw, rq)
 	if accept == nil {
 		s.httpError(rw, rq, http.StatusInternalServerError)
 		log.Panic(rq, "underlying http.ResponseWriter MUST implement http.Hijacker or ConnectAcceptor")
@@ -75,7 +74,6 @@ func (s *Tunnel) ServeHTTP(rw http.ResponseWriter, rq *http.Request) {
 		return
 	}
 	defer conn.Close()
-	log.WithStatusCode(rq, http.StatusOK)
 
 	wg := sync.WaitGroup{}
 	wg.Add(2)
@@ -89,11 +87,10 @@ func (s *Tunnel) ServeHTTP(rw http.ResponseWriter, rq *http.Request) {
 	}()
 	go func() {
 		defer wg.Done()
-		n, err := s.copy(conn, u)
+		_, err := s.copy(conn, u)
 		if err != nil {
 			log.Debug(rq, "upstream -> client copy error", "error", err)
 		}
-		log.WithContentLength(rq, n)
 	}()
 
 	wg.Wait()

@@ -5,6 +5,10 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"sync"
+	"sync/atomic"
+
+	"sarak.sh/mikluko/multiproxy/pkg/middleware/log"
 )
 
 // ConnectAcceptor is implemented by a ResponseWriter whose client is answered in a protocol of its own, as the
@@ -17,9 +21,29 @@ type ConnectAcceptor interface {
 	AcceptConnect() (net.Conn, *bufio.ReadWriter, error)
 }
 
-// connectAcceptor returns how to accept a CONNECT request on rw: the ConnectAcceptor rw implements, directly or behind
-// a chain of Unwrap methods, or else hijacking rw and writing a 200 response. It returns nil where rw offers neither.
-func connectAcceptor(rw http.ResponseWriter) func() (net.Conn, *bufio.ReadWriter, error) {
+// connectAcceptor returns how to accept the CONNECT request rq on rw: the ConnectAcceptor rw implements, directly or
+// behind a chain of Unwrap methods, or else hijacking rw and writing a 200 response. It returns nil where rw offers
+// neither.
+//
+// An accepted session is recorded in the request's access log with status 200 and, once the returned connection is
+// closed, with the number of bytes written to the client.
+func connectAcceptor(rw http.ResponseWriter, rq *http.Request) func() (net.Conn, *bufio.ReadWriter, error) {
+	accept := acceptorOf(rw)
+	if accept == nil {
+		return nil
+	}
+	return func() (net.Conn, *bufio.ReadWriter, error) {
+		conn, bufrw, err := accept()
+		if err != nil {
+			return nil, nil, err
+		}
+		log.WithStatusCode(rq, http.StatusOK)
+		c := &countingConn{Conn: conn, rq: rq}
+		return c, bufio.NewReadWriter(bufrw.Reader, bufio.NewWriter(c)), nil
+	}
+}
+
+func acceptorOf(rw http.ResponseWriter) func() (net.Conn, *bufio.ReadWriter, error) {
 	var hj http.Hijacker
 	for w := rw; w != nil; {
 		if a, ok := w.(ConnectAcceptor); ok {
@@ -52,4 +76,23 @@ func connectAcceptor(rw http.ResponseWriter) func() (net.Conn, *bufio.ReadWriter
 		}
 		return conn, bufrw, nil
 	}
+}
+
+// countingConn counts the bytes written to the client and records them in rq's access log when it is closed.
+type countingConn struct {
+	net.Conn
+	rq      *http.Request
+	written atomic.Int64
+	once    sync.Once
+}
+
+func (c *countingConn) Write(p []byte) (int, error) {
+	n, err := c.Conn.Write(p)
+	c.written.Add(int64(n))
+	return n, err
+}
+
+func (c *countingConn) Close() error {
+	c.once.Do(func() { log.WithContentLength(c.rq, int(c.written.Load())) })
+	return c.Conn.Close()
 }

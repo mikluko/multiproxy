@@ -22,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Every request pipelined on an intercepted connection is answered, where requests after the first could be lost.
 - A client that starts its TLS handshake before reading the `CONNECT` response is intercepted instead of stalling.
 - A certificate that cannot be issued refuses the `CONNECT` request with 500, where the client was told the connection was established first.
+- Access records carry the status and byte count of every response, including errors multiproxy answers itself and refused `CONNECT` requests.
 
 ## [0.4.0] - 2026-10-26
 
