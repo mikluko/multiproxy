@@ -165,3 +165,20 @@ func TestRouter_ServeHTTP_hostRules(t *testing.T) {
 		require.Equal(t, http.StatusNotFound, rw.Code)
 	})
 }
+
+func TestRouter_HandleConnectHost_fallback(t *testing.T) {
+	ok := http.HandlerFunc(func(rw http.ResponseWriter, _ *http.Request) { rw.WriteHeader(http.StatusNoContent) })
+	other := http.HandlerFunc(func(rw http.ResponseWriter, _ *http.Request) { rw.WriteHeader(http.StatusAccepted) })
+	r := &router2.Router{Default: ok}
+	r.HandleConnectHost("*", other)
+	r.HandleConnectHost("example.com", ok)
+
+	serve := func(method, target string) int {
+		rw := httptest.NewRecorder()
+		r.ServeHTTP(rw, httptest.NewRequest(method, target, nil))
+		return rw.Code
+	}
+	require.Equal(t, http.StatusNoContent, serve(http.MethodConnect, "example.com:443"), "a pattern added after * still wins")
+	require.Equal(t, http.StatusAccepted, serve(http.MethodConnect, "anything.test:443"))
+	require.Equal(t, http.StatusNoContent, serve(http.MethodGet, "http://anything.test/"))
+}
