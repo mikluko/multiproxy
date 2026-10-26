@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-26
+
 ### Added
 
 - `-leaf-key` selects RSA or ECDSA P-256 keys for MITM certificates, and `SelfSignedCA.KeyAlgorithm` does the same in the library.
@@ -106,7 +108,8 @@ Initial release.
 
 - HTTP, tunneling and MITM proxy handlers, a request router, and logging middleware.
 
-[Unreleased]: https://forge.sarak.sh/mikluko/multiproxy/compare/v0.3.1...HEAD
+[Unreleased]: https://forge.sarak.sh/mikluko/multiproxy/compare/v0.4.0...HEAD
+[0.4.0]: https://forge.sarak.sh/mikluko/multiproxy/compare/v0.3.1...v0.4.0
 [0.3.1]: https://forge.sarak.sh/mikluko/multiproxy/compare/v0.3.0...v0.3.1
 [0.3.0]: https://forge.sarak.sh/mikluko/multiproxy/compare/v0.2.3...v0.3.0
 [0.2.3]: https://forge.sarak.sh/mikluko/multiproxy/compare/v0.2.2...v0.2.3
