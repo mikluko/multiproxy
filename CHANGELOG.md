@@ -14,11 +14,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `issuer.Cache` keeps the certificates another Issuer issues, per common name, and issues again past `NotAfter`.
 - The `proxy` package assembles a complete proxy from host patterns, an Issuer, middleware and loggers with `proxy.New`.
 - `router.Router.HandleConnectHost` takes `*` as the fallback for hosts no other pattern matches.
+- `-upstream-ca` trusts a private CA for intercepted upstreams, and `-upstream-insecure` accepts any upstream certificate.
+- `proxy.Config.Transport` sets the transport for upstream requests.
 
 ### Changed
 
 - **Breaking:** `socks5.Server` no longer offers `Hijack` on its ResponseWriter; a handler accepts the connection with `AcceptConnect` instead of hijacking it and writing `200 OK`.
 - **Breaking:** `MITMHandler.CertCacheSize` is removed and `MITMHandler` keeps no certificates itself; an Issuer you set is called on every `CONNECT` unless you wrap it in `issuer.Cache`.
+- **Breaking:** intercepted upstreams must present a certificate that verifies against the system roots, or `502 Bad Gateway` is answered; `handlers.DefaultTransport` verifies. Add `-upstream-ca` for a private CA, or `-upstream-insecure` for the old behaviour.
 
 ### Fixed
 

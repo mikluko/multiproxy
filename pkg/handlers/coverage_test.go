@@ -97,3 +97,28 @@ func TestTunnel_requiresHijacker(t *testing.T) {
 		(&handlers.Tunnel{}).ServeHTTP(httptest.NewRecorder(), rq)
 	})
 }
+
+func TestMITMHandler_verifiesUpstream(t *testing.T) {
+	upstream := httptest.NewTLSServer(http.HandlerFunc(func(rw http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(rw, "hello")
+	}))
+	defer upstream.Close()
+
+	status := func(h http.Handler) int {
+		p := httptest.NewServer(h)
+		defer p.Close()
+		rq, _ := http.NewRequest(http.MethodGet, upstream.URL, nil)
+		rs, err := testTransport(p.URL).RoundTrip(rq)
+		require.NoError(t, err)
+		_ = rs.Body.Close()
+		return rs.StatusCode
+	}
+
+	t.Run("an untrusted upstream certificate is a bad gateway", func(t *testing.T) {
+		require.Equal(t, http.StatusBadGateway, status(&handlers.MITMHandler{}))
+	})
+	t.Run("a trusted one passes", func(t *testing.T) {
+		trusting := upstream.Client().Transport
+		require.Equal(t, http.StatusOK, status(&handlers.MITMHandler{Handler: &handlers.HTTPHandler{Transport: trusting}}))
+	})
+}

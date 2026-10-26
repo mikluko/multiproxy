@@ -41,7 +41,7 @@ func TestConnectAcceptor(t *testing.T) {
 
 	for name, h := range map[string]http.Handler{
 		"tunnel": &handlers.Tunnel{},
-		"mitm":   &handlers.MITMHandler{},
+		"mitm":   trustingMITM(),
 	} {
 		for _, unwrap := range []bool{false, true} {
 			t.Run(name+map[bool]string{false: "", true: " behind Unwrap"}[unwrap], func(t *testing.T) {

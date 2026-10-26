@@ -59,7 +59,7 @@ func TestAccessAccounting(t *testing.T) {
 		require.Greater(t, recs[0]["content-length"], float64(100))
 	})
 	t.Run("MITM", func(t *testing.T) {
-		recs := accessRecords(t, &handlers.MITMHandler{}, testTLSServer.URL+"/bytes/100")
+		recs := accessRecords(t, trustingMITM(), testTLSServer.URL+"/bytes/100")
 		require.Len(t, recs, 1)
 		require.EqualValues(t, 200, recs[0]["status"])
 		require.Greater(t, recs[0]["content-length"], float64(100))

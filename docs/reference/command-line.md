@@ -25,6 +25,8 @@ Table: flags of the `multiproxy` command.
 | `-print-ca` | off | Prints the CA certificate as PEM to stdout and exits. |
 | `-leaf-key <algorithm>` | `rsa` | Key algorithm of issued certificates: `rsa` for RSA 2048, `ecdsa` for ECDSA P-256. |
 | `-leaf-validity <duration>` | `720h0m0s` | Validity of issued certificates, as a Go duration such as `168h`. |
+| `-upstream-ca <file>` | none | PEM file of CA certificates trusted for upstream servers, beside the system roots. Excludes `-upstream-insecure`. |
+| `-upstream-insecure` | off | Accepts any upstream server certificate. Excludes `-upstream-ca`. |
 | `-set-header <host>=<name>: <value>` | none | Sets a header on requests to matching hosts. Repeatable. |
 | `-del-header <host>=<name>` | none | Strips a header from requests to matching hosts. Repeatable. |
 | `-novia` | off | Leaves out the `Via` header. |
@@ -62,7 +64,10 @@ a CA is refused. Without the flags, multiproxy creates a CA in memory on every s
 
 ## Upstream connections
 
-For an intercepted request, multiproxy connects to the real server over TLS without verifying its certificate.
+For an intercepted request, multiproxy connects to the real server over TLS and verifies its certificate against the
+system roots, and also against `-upstream-ca` where given. A certificate that does not verify answers the client with
+`502 Bad Gateway`. `-upstream-insecure` turns verification off.
+
 Connecting to a tunnel target times out after 5 seconds.
 
 ## Request headers

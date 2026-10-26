@@ -27,8 +27,10 @@ alone, and why a CA kept on disk deserves the care of any other credential. Clie
 their own trust store, refuse an intercepted connection however the CA is installed.
 
 Interception also replaces the client's view of the server with the proxy's. The client sees multiproxy's
-certificate and never the real server's, so the client's own verification of the server is gone. multiproxy does
-not verify the real server's certificate in its place: it accepts whatever certificate the server presents.
+certificate and never the real server's, so the client's own verification of the server is gone. multiproxy verifies
+the real server's certificate in its place, against the system roots, and answers `502 Bad Gateway` where it does
+not verify. The client can no longer tell which roots that was, or see the server's certificate for itself, and
+`-upstream-insecure` drops the check altogether: then a forged upstream is indistinguishable from the real one.
 
 ## One set of rules
 

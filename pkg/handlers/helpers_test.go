@@ -12,12 +12,22 @@ import (
 	"time"
 
 	"github.com/mccutchen/go-httpbin/v2/httpbin"
+
+	"sarak.sh/mikluko/multiproxy/pkg/handlers"
 )
 
 var (
 	testServer    *httptest.Server
 	testTLSServer *httptest.Server
+
+	// trustingUpstream trusts the certificate every httptest TLS server shares.
+	trustingUpstream http.RoundTripper
 )
+
+// trustingMITM is a MITMHandler whose upstream requests trust httptest TLS servers.
+func trustingMITM() *handlers.MITMHandler {
+	return &handlers.MITMHandler{Handler: &handlers.HTTPHandler{Transport: trustingUpstream}}
+}
 
 func TestMain(m *testing.M) {
 	testServer = httptest.NewServer(httpbin.New().Handler())
@@ -25,6 +35,7 @@ func TestMain(m *testing.M) {
 
 	testTLSServer = httptest.NewTLSServer(httpbin.New().Handler())
 	defer testTLSServer.Close()
+	trustingUpstream = testTLSServer.Client().Transport
 
 	os.Exit(m.Run())
 }

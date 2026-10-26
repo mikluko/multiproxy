@@ -96,6 +96,10 @@ func TestParseFlags(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, "127.0.0.1:1080", cfg.socks)
 	})
+	t.Run("upstream-ca with upstream-insecure", func(t *testing.T) {
+		_, err := parseFlags([]string{"-upstream-ca", "ca.pem", "-upstream-insecure"}, io.Discard)
+		require.ErrorContains(t, err, "-upstream-insecure")
+	})
 	t.Run("help", func(t *testing.T) {
 		_, err := parseFlags([]string{"-h"}, io.Discard)
 		require.ErrorIs(t, err, flag.ErrHelp)
@@ -107,6 +111,7 @@ func TestNewHandler(t *testing.T) {
 	defer backend.Close()
 	tlsBackend := httptest.NewTLSServer(http.HandlerFunc(echoVia))
 	defer tlsBackend.Close()
+	upstreamCA := certFile(t, tlsBackend)
 
 	t.Run("plain HTTP adds Via", func(t *testing.T) {
 		rs := get(t, startProxy(t), backend.URL)
@@ -124,14 +129,14 @@ func TestNewHandler(t *testing.T) {
 		require.True(t, rs.TLS.PeerCertificates[0].Equal(tlsBackend.Certificate()))
 	})
 	t.Run("CONNECT to a -mitm host is intercepted", func(t *testing.T) {
-		rs := get(t, startProxy(t, "-mitm", "127.0.0.1"), tlsBackend.URL)
+		rs := get(t, startProxy(t, "-mitm", "127.0.0.1", "-upstream-ca", upstreamCA), tlsBackend.URL)
 		require.Equal(t, http.StatusOK, rs.StatusCode)
 		leaf := rs.TLS.PeerCertificates[0]
 		require.Equal(t, issuer.DefaultIssuerRootTmpl.Subject.CommonName, leaf.Issuer.CommonName)
 		require.IsType(t, &rsa.PublicKey{}, leaf.PublicKey)
 	})
 	t.Run("-leaf-key ecdsa", func(t *testing.T) {
-		rs := get(t, startProxy(t, "-mitm", "127.0.0.1", "-leaf-key", "ecdsa"), tlsBackend.URL)
+		rs := get(t, startProxy(t, "-mitm", "127.0.0.1", "-upstream-ca", upstreamCA, "-leaf-key", "ecdsa"), tlsBackend.URL)
 		require.Equal(t, http.StatusOK, rs.StatusCode)
 		require.IsType(t, &ecdsa.PublicKey{}, rs.TLS.PeerCertificates[0].PublicKey)
 	})
@@ -153,7 +158,7 @@ func TestNewHandler(t *testing.T) {
 		require.Equal(t, "yes", rs.Header.Get("X-Seen-Test"))
 	})
 	t.Run("-set-header on an intercepted request", func(t *testing.T) {
-		rs := get(t, startProxy(t, "-mitm", "127.0.0.1", "-set-header", "127.0.0.1=X-Test: yes"), tlsBackend.URL)
+		rs := get(t, startProxy(t, "-mitm", "127.0.0.1", "-upstream-ca", upstreamCA, "-set-header", "127.0.0.1=X-Test: yes"), tlsBackend.URL)
 		require.Equal(t, "yes", rs.Header.Get("X-Seen-Test"))
 	})
 	t.Run("-set-header on another host", func(t *testing.T) {
@@ -238,7 +243,7 @@ func TestLoadCA(t *testing.T) {
 		roots := x509.NewCertPool()
 		roots.AddCert(first.Leaf)
 		c := &http.Client{Transport: &http.Transport{
-			Proxy:           http.ProxyURL(startProxy(t, append(args, "-mitm", "127.0.0.1")...)),
+			Proxy:           http.ProxyURL(startProxy(t, append(args, "-mitm", "127.0.0.1", "-upstream-ca", certFile(t, backend))...)),
 			TLSClientConfig: &tls.Config{RootCAs: roots},
 		}}
 		rs, err := c.Get(backend.URL)
@@ -389,4 +394,40 @@ func TestNewLogHandlers(t *testing.T) {
 	require.NotContains(t, a, "msg")
 	require.Equal(t, "WARN", s["level"])
 	require.Equal(t, "something", s["msg"])
+}
+
+func TestUpstreamVerification(t *testing.T) {
+	backend := httptest.NewTLSServer(http.HandlerFunc(echoVia))
+	defer backend.Close()
+
+	t.Run("an untrusted upstream is a bad gateway", func(t *testing.T) {
+		rs := get(t, startProxy(t, "-mitm", "127.0.0.1"), backend.URL)
+		require.Equal(t, http.StatusBadGateway, rs.StatusCode)
+	})
+	t.Run("-upstream-insecure trusts any upstream", func(t *testing.T) {
+		rs := get(t, startProxy(t, "-mitm", "127.0.0.1", "-upstream-insecure"), backend.URL)
+		require.Equal(t, http.StatusOK, rs.StatusCode)
+	})
+	t.Run("-upstream-ca names a missing file", func(t *testing.T) {
+		cfg, err := parseFlags([]string{"-upstream-ca", filepath.Join(t.TempDir(), "missing.pem")}, io.Discard)
+		require.NoError(t, err)
+		_, err = newHandler(cfg, nil, discard, discard)
+		require.Error(t, err)
+	})
+	t.Run("-upstream-ca holds no certificate", func(t *testing.T) {
+		empty := filepath.Join(t.TempDir(), "empty.pem")
+		require.NoError(t, os.WriteFile(empty, []byte("not PEM"), 0o644))
+		cfg, err := parseFlags([]string{"-upstream-ca", empty}, io.Discard)
+		require.NoError(t, err)
+		_, err = newHandler(cfg, nil, discard, discard)
+		require.ErrorContains(t, err, "-upstream-ca")
+	})
+}
+
+// certFile writes the certificate of s as PEM to a file and returns its path.
+func certFile(t *testing.T, s *httptest.Server) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "upstream-ca.pem")
+	require.NoError(t, os.WriteFile(path, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: s.Certificate().Raw}), 0o644))
+	return path
 }

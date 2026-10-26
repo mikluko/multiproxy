@@ -19,6 +19,7 @@ import (
 	"syscall"
 	"time"
 
+	"sarak.sh/mikluko/multiproxy/pkg/handlers"
 	"sarak.sh/mikluko/multiproxy/pkg/issuer"
 	"sarak.sh/mikluko/multiproxy/pkg/middleware/headers"
 	"sarak.sh/mikluko/multiproxy/pkg/proxy"
@@ -41,6 +42,8 @@ type config struct {
 	printCA         bool
 	headerRules     []headers.Rule
 	socks           string
+	upstreamCA      string
+	upstreamInsec   bool
 }
 
 // parseFlags reads the command line.
@@ -65,6 +68,8 @@ func parseFlags(args []string, output io.Writer) (config, error) {
 	fs.StringVar(&cfg.caName, "ca-name", issuer.DefaultIssuerRootTmpl.Subject.CommonName, "common name of a generated CA")
 	fs.StringVar(&cfg.caOrg, "ca-org", issuer.DefaultIssuerRootTmpl.Subject.Organization[0], "organization of a generated CA")
 	fs.BoolVar(&cfg.printCA, "print-ca", false, "print the CA certificate as PEM and exit")
+	fs.StringVar(&cfg.upstreamCA, "upstream-ca", "", "PEM file of CA certificates to trust for intercepted upstreams, beside the system roots")
+	fs.BoolVar(&cfg.upstreamInsec, "upstream-insecure", false, "do not verify the certificates of intercepted upstreams")
 	fs.Var(headerFlag{rules: &cfg.headerRules}, "set-header", "HOST=Name: value sets a header on plain-HTTP and MITM requests to HOST; repeatable")
 	fs.Var(headerFlag{rules: &cfg.headerRules, del: true}, "del-header", "HOST=Name strips a header from plain-HTTP and MITM requests to HOST; repeatable")
 	if err := fs.Parse(args); err != nil {
@@ -81,6 +86,9 @@ func parseFlags(args []string, output io.Writer) (config, error) {
 	}
 	if cfg.leafValidity <= 0 {
 		return config{}, fmt.Errorf("-leaf-validity: want a positive duration, got %s", cfg.leafValidity)
+	}
+	if cfg.upstreamCA != "" && cfg.upstreamInsec {
+		return config{}, errors.New("-upstream-ca and -upstream-insecure: give one or neither")
 	}
 	if (cfg.caCert == "") != (cfg.caKey == "") {
 		return config{}, errors.New("-ca-cert and -ca-key: give both or neither")
@@ -112,6 +120,10 @@ func newHandler(cfg config, ca *tls.Certificate, access, server *slog.Logger) (h
 	if cfg.noAccessLog {
 		access = nil
 	}
+	transport, err := upstreamTransport(cfg)
+	if err != nil {
+		return nil, err
+	}
 	var middleware []func(http.Handler) http.Handler
 	if len(cfg.headerRules) > 0 {
 		middleware = append(middleware, headers.Rewrite(cfg.headerRules...))
@@ -125,11 +137,40 @@ func newHandler(cfg config, ca *tls.Certificate, access, server *slog.Logger) (h
 			Validity:     cfg.leafValidity,
 		}},
 		Middleware:      middleware,
+		Transport:       transport,
 		NoVia:           cfg.noVia,
 		NoXForwardedFor: cfg.noXForwardedFor,
 		Access:          access,
 		Server:          server,
 	})
+}
+
+// upstreamTransport returns the transport for upstream requests: handlers.DefaultTransport, or a copy of it that also
+// trusts the certificates in -upstream-ca, or one that verifies nothing with -upstream-insecure.
+func upstreamTransport(cfg config) (http.RoundTripper, error) {
+	switch {
+	case cfg.upstreamInsec:
+		t := handlers.DefaultTransport.Clone()
+		t.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
+		return t, nil
+	case cfg.upstreamCA != "":
+		pem, err := os.ReadFile(cfg.upstreamCA)
+		if err != nil {
+			return nil, err
+		}
+		roots, err := x509.SystemCertPool()
+		if err != nil {
+			return nil, err
+		}
+		if !roots.AppendCertsFromPEM(pem) {
+			return nil, fmt.Errorf("-upstream-ca: no certificate in %s", cfg.upstreamCA)
+		}
+		t := handlers.DefaultTransport.Clone()
+		t.TLSClientConfig = &tls.Config{RootCAs: roots}
+		return t, nil
+	default:
+		return handlers.DefaultTransport, nil
+	}
 }
 
 // patterns splits a comma-separated flag value into host patterns.

@@ -11,8 +11,6 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
-
-	"sarak.sh/mikluko/multiproxy/pkg/handlers"
 )
 
 // connectMITM opens a CONNECT session to target through proxy p and returns the client side of the intercepted
@@ -48,7 +46,7 @@ func TestMITMHandler_streams(t *testing.T) {
 	defer upstream.Close()
 	defer close(release)
 
-	p := httptest.NewServer(&handlers.MITMHandler{})
+	p := httptest.NewServer(trustingMITM())
 	defer p.Close()
 
 	line := make(chan string, 1)
@@ -77,7 +75,7 @@ func TestMITMHandler_pipelining(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	p := httptest.NewServer(&handlers.MITMHandler{})
+	p := httptest.NewServer(trustingMITM())
 	defer p.Close()
 
 	target := upstream.Listener.Addr().String()
@@ -135,7 +133,7 @@ func TestMITMHandler_handshakeBeforeConnectResponse(t *testing.T) {
 		_, _ = io.WriteString(rw, "hello")
 	}))
 	defer upstream.Close()
-	p := httptest.NewServer(&handlers.MITMHandler{})
+	p := httptest.NewServer(trustingMITM())
 	defer p.Close()
 
 	target := upstream.Listener.Addr().String()

@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"crypto/tls"
+	"errors"
 	"net"
 	"net/http"
 	"net/http/httputil"
@@ -61,16 +62,20 @@ func (s *HTTPHandler) director(rq *http.Request) {
 	}
 }
 
+// handleError answers 502 Bad Gateway for an upstream that cannot be reached or whose TLS certificate does not verify,
+// and 500 Internal Server Error for anything else.
 func (s *HTTPHandler) handleError(rw http.ResponseWriter, rq *http.Request, err error) {
-	if _, ok := err.(*net.OpError); ok {
+	var opErr *net.OpError
+	var verifyErr *tls.CertificateVerificationError
+	if errors.As(err, &opErr) || errors.As(err, &verifyErr) {
 		http.Error(rw, http.StatusText(http.StatusBadGateway), http.StatusBadGateway)
 		return
 	}
 	http.Error(rw, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
-	return
 }
 
-// DefaultTransport is the default transport for HTTPHandler to execute HTTP requests
+// DefaultTransport is the default transport for HTTPHandler to execute HTTP requests. It verifies upstream TLS
+// certificates against the system roots.
 var DefaultTransport = &http.Transport{
 	Proxy: http.ProxyFromEnvironment,
 	DialContext: (&net.Dialer{
@@ -82,9 +87,6 @@ var DefaultTransport = &http.Transport{
 	TLSHandshakeTimeout:   10 * time.Second,
 	ExpectContinueTimeout: 1 * time.Second,
 	MaxIdleConnsPerHost:   runtime.GOMAXPROCS(0) + 1,
-	TLSClientConfig: &tls.Config{
-		InsecureSkipVerify: true,
-	},
-	DisableCompression: true,
+	DisableCompression:    true,
 	DisableKeepAlives:  false,
 }

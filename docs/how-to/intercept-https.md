@@ -46,6 +46,15 @@ The certificates multiproxy issues for intercepted hosts use RSA 2048 keys and a
 - To use ECDSA P-256 keys, which are cheaper to generate per host, add `-leaf-key ecdsa`.
 - To change the validity, add `-leaf-validity` with a duration, for example `-leaf-validity 168h`.
 
+## Intercept a host with a private or self-signed certificate
+
+multiproxy verifies the certificate of each intercepted host against the system roots, and answers
+`502 Bad Gateway` when it does not verify.
+
+- To trust a private CA as well, add `-upstream-ca <file>`, where `<file>` holds that CA's certificate as PEM.
+- To accept any certificate, for example a self-signed one in a test environment, add `-upstream-insecure`.
+  Anyone able to intercept the connection to that host can then impersonate it.
+
 ## What's next
 
 - [Command-line reference](../reference/command-line.md) lists every flag and the host pattern syntax.
