@@ -97,6 +97,23 @@ applies in the order given:
 The rules reach plain-HTTP requests and requests intercepted by MITM. A tunnelled connection is opaque to the
 proxy and passes unchanged.
 
+## Logs and telemetry
+
+Access records go to stdout and server records to stderr, both as JSON. A record written while a request is traced
+carries its `trace_id` and `span_id`.
+
+The OpenTelemetry SDK is configured by the standard `OTEL_*` environment variables. By default it exports traces,
+metrics and logs over OTLP to a collector on localhost. To send them elsewhere:
+
+    OTEL_EXPORTER_OTLP_ENDPOINT=http://collector:4318 multiproxy
+
+`OTEL_SDK_DISABLED=true` turns telemetry off, and `OTEL_TRACES_EXPORTER=none` and its metric and log counterparts turn
+off one signal. Export errors are logged at warn level where an OTLP endpoint is set, and at debug level otherwise,
+so that a default run without a collector stays quiet.
+
+Each proxied request, and each request intercepted by MITM, is a server span. A `traceparent` header from the client
+continues its trace, and the upstream request carries the proxy's span in its place.
+
 ## Library use
 
 The packages under `pkg/` compose into a proxy of your own. `MITMHandler.Handler` serves every request intercepted

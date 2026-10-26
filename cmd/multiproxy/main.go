@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
@@ -13,10 +14,13 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/justinas/alice"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 
 	"sarak.sh/mikluko/multiproxy/pkg/handlers"
 	"sarak.sh/mikluko/multiproxy/pkg/issuer"
@@ -112,7 +116,8 @@ func writeCA(w io.Writer, ca *tls.Certificate) error {
 }
 
 // newHandler builds the proxy described by cfg, signing MITM certificates with ca, logging each request through
-// access and server.
+// access and server. Each request, and each request intercepted by MITM, is a server span of the global tracer
+// provider, and each upstream request a client span propagated to the upstream server.
 func newHandler(cfg config, ca *tls.Certificate, access, server *slog.Logger) (http.Handler, error) {
 	if cfg.noAccessLog {
 		access = slog.New(slog.DiscardHandler)
@@ -128,6 +133,7 @@ func newHandler(cfg config, ca *tls.Certificate, access, server *slog.Logger) (h
 		}
 	}
 
+	upstream := otelhttp.NewTransport(handlers.DefaultTransport)
 	httpMiddleware := []alice.Constructor{lmw, named("http")}
 	if !cfg.noVia {
 		httpMiddleware = append(httpMiddleware, via.Via)
@@ -137,14 +143,16 @@ func newHandler(cfg config, ca *tls.Certificate, access, server *slog.Logger) (h
 	}
 	mux := &router.Router{
 		Default: alice.New(httpMiddleware...).Then(&handlers.HTTPHandler{
+			Transport:       upstream,
 			NoXForwardedFor: cfg.noXForwardedFor,
 		}),
 	}
 
 	mitmHandler := &handlers.MITMHandler{
-		Handler: alice.New(httpMiddleware...).Then(&handlers.HTTPHandler{
+		Handler: otelhttp.NewHandler(alice.New(httpMiddleware...).Then(&handlers.HTTPHandler{
+			Transport:       upstream,
 			NoXForwardedFor: cfg.noXForwardedFor,
-		}),
+		}), "mitm", spanName),
 		Issuer: &issuer.SelfSignedCA{
 			Cert:         ca,
 			KeyAlgorithm: cfg.leafKey,
@@ -162,7 +170,7 @@ func newHandler(cfg config, ca *tls.Certificate, access, server *slog.Logger) (h
 		return nil, err
 	}
 
-	return mux, nil
+	return otelhttp.NewHandler(mux, "proxy", spanName), nil
 }
 
 func main() {
@@ -170,7 +178,7 @@ func main() {
 }
 
 // run is the command: it returns the exit status, 2 for a usage error and 1 for any other failure. Unless
-// -print-ca is given, it returns only when a listener fails.
+// -print-ca is given, it returns when a listener fails, or with 0 on SIGINT or SIGTERM.
 func run(args []string, stdout, stderr io.Writer) int {
 	cfg, err := parseFlags(args, stderr)
 	if errors.Is(err, flag.ErrHelp) {
@@ -181,8 +189,22 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 
-	access, server := newLoggers(stdout, stderr)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	access, server, shutdown, err := setupTelemetry(ctx, stdout, stderr)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
 	l := server.With("logger", "cli")
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+		defer cancel()
+		if err := shutdown(ctx); err != nil {
+			l.Log(ctx, exportErrorLevel(), "telemetry shutdown", "error", err)
+		}
+	}()
 	fail := func(err error) int {
 		l.Error("exiting", "error", err)
 		return 1
@@ -221,22 +243,25 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 	l.Info("starting", "listen", httpListener.Addr().String())
 	go func() { errc <- http.Serve(httpListener, h) }()
-	return fail(<-errc)
+	select {
+	case err := <-errc:
+		return fail(err)
+	case <-ctx.Done():
+		l.Info("stopping")
+		return 0
+	}
 }
 
-// newLoggers returns the access logger, writing JSON records without level or message to stdout, and the server
-// logger, writing JSON records to stderr.
-func newLoggers(stdout, stderr io.Writer) (access, server *slog.Logger) {
-	dropLevelAndMessage := func(groups []string, a slog.Attr) slog.Attr {
-		if len(groups) == 0 && (a.Key == slog.LevelKey || a.Key == slog.MessageKey) {
-			return slog.Attr{}
-		}
-		return a
+// spanName names a span after the request method, and after the target too for CONNECT.
+var spanName = otelhttp.WithSpanNameFormatter(func(_ string, rq *http.Request) string {
+	if rq.Method == http.MethodConnect {
+		return "CONNECT " + rq.Host
 	}
-	access = slog.New(slog.NewJSONHandler(stdout, &slog.HandlerOptions{ReplaceAttr: dropLevelAndMessage}))
-	server = slog.New(slog.NewJSONHandler(stderr, nil))
-	return access, server
-}
+	return rq.Method
+})
+
+// shutdownTimeout bounds the flush of telemetry on exit.
+const shutdownTimeout = 5 * time.Second
 
 func registerHandler(mux *router.Router, handler http.Handler, hostnames string) error {
 	if hostnames == "" {
