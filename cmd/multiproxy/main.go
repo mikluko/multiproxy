@@ -61,9 +61,9 @@ func parseFlags(args []string, output io.Writer) (config, error) {
 	fs.BoolVar(&cfg.noAccessLog, "noaccesslog", false, "disable access logging")
 	fs.StringVar(&cfg.mitmHosts, "mitm", "", "coma-separated list of hostnames CONNECT requests to which will be handled with MITM proxy")
 	fs.StringVar(&cfg.tunnelHosts, "tunnel", "", "coma-separated list of host names CONNECT requests to which will be handled with tunnel proxy")
-	fs.StringVar(&leafKey, "leaf-key", "rsa", "key algorithm of MITM certificates: rsa or ecdsa")
-	fs.DurationVar(&cfg.leafValidity, "leaf-validity", issuer.DefaultIssuerValidity, "validity of MITM certificates")
-	fs.StringVar(&cfg.caCert, "ca-cert", "", "PEM file of the CA certificate signing MITM certificates; created with -ca-key when neither exists")
+	fs.StringVar(&leafKey, "leaf-key", "rsa", "key algorithm of leaf certificates: rsa or ecdsa")
+	fs.DurationVar(&cfg.leafValidity, "leaf-validity", issuer.DefaultIssuerValidity, "validity of leaf certificates")
+	fs.StringVar(&cfg.caCert, "ca-cert", "", "PEM file of the proxy CA certificate, which signs leaf certificates; created with -ca-key when neither exists")
 	fs.StringVar(&cfg.caKey, "ca-key", "", "PEM file of the CA private key")
 	fs.StringVar(&cfg.caName, "ca-name", issuer.DefaultIssuerRootTmpl.Subject.CommonName, "common name of a generated CA")
 	fs.StringVar(&cfg.caOrg, "ca-org", issuer.DefaultIssuerRootTmpl.Subject.Organization[0], "organization of a generated CA")
@@ -96,7 +96,7 @@ func parseFlags(args []string, output io.Writer) (config, error) {
 	return cfg, nil
 }
 
-// loadCA returns the CA that signs MITM certificates: read from -ca-cert and -ca-key, created there when neither
+// loadCA returns the proxy CA, which signs leaf certificates: read from -ca-cert and -ca-key, created there when neither
 // exists, or generated in memory when neither flag is given.
 func loadCA(cfg config) (*tls.Certificate, error) {
 	tmpl := issuer.RootTemplate(cfg.caName, cfg.caOrg, caValidity)
@@ -114,7 +114,7 @@ func writeCA(w io.Writer, ca *tls.Certificate) error {
 	return pem.Encode(w, &pem.Block{Type: "CERTIFICATE", Bytes: ca.Certificate[0]})
 }
 
-// newHandler builds the proxy described by cfg, signing MITM certificates with ca, logging each request through
+// newHandler builds the proxy described by cfg, signing leaf certificates with ca, logging each request through
 // access and server.
 func newHandler(cfg config, ca *tls.Certificate, access, server *slog.Logger) (http.Handler, error) {
 	if cfg.noAccessLog {

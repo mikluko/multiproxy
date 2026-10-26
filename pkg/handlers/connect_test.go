@@ -15,7 +15,7 @@ import (
 	"sarak.sh/mikluko/multiproxy/pkg/handlers"
 )
 
-// acceptor is a ResponseWriter for a front end that answers an accepted CONNECT in its own protocol.
+// acceptor is a ResponseWriter for an entry point that answers an accepted CONNECT in its own protocol.
 type acceptor struct {
 	httptest.ResponseRecorder
 	conn     net.Conn

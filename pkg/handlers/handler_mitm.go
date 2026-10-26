@@ -17,7 +17,7 @@ import (
 //
 // The zero value of MITMHandler is a valid http.Handler.
 type MITMHandler struct {
-	// Handler is an optional http.Handler which will be used by the proxy to serve intercepted sub-requests
+	// Handler is an optional http.Handler which will be used by the proxy to serve intercepted requests
 	//
 	// If nil, zero value of HTTPProxy will be used.
 	Handler http.Handler
