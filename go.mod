@@ -9,7 +9,6 @@ require (
 	github.com/mccutchen/go-httpbin/v2 v2.26.0
 	github.com/stretchr/testify v1.12.1
 	go.uber.org/zap v1.28.0
-	golang.org/x/net v0.61.0
 )
 
 require (
