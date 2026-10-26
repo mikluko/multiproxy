@@ -153,11 +153,11 @@ func newHandler(cfg config, ca *tls.Certificate, access, server *slog.Logger) (h
 			Transport:       upstream,
 			NoXForwardedFor: cfg.noXForwardedFor,
 		}), "mitm", spanName),
-		Issuer: &issuer.SelfSignedCA{
+		Issuer: &issuer.Cache{Issuer: &issuer.SelfSignedCA{
 			Cert:         ca,
 			KeyAlgorithm: cfg.leafKey,
 			Validity:     cfg.leafValidity,
-		},
+		}},
 	}
 	if err := registerHandler(mux, alice.New(lmw, named("mitm")).Then(mitmHandler), cfg.mitmHosts); err != nil {
 		return nil, err
