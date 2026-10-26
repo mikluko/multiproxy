@@ -43,6 +43,7 @@ Reference:
 
 - [Command-line reference](docs/reference/command-line.md): flags, host patterns, logs, environment and exit status
 - [Package documentation](https://pkg.go.dev/sarak.sh/mikluko/multiproxy) for the Go packages
+- [Glossary](GLOSSARY.md) of the terms the documentation and code use
 - [Changelog](CHANGELOG.md)
 
 Explanation:
