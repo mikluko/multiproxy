@@ -18,7 +18,9 @@ jobs:
         with:
           go-version-file: go.mod
       - run: go build ./...
-      - run: go test -failfast ./...
+      - run: go test -failfast -race -coverprofile="$RUNNER_TEMP/cover.out" ./...
+      - name: Coverage
+        run: go tool cover -func="$RUNNER_TEMP/cover.out" | tail -1 | tee -a "$GITHUB_STEP_SUMMARY"
 
   changelog:
     runs-on: ubuntu-latest

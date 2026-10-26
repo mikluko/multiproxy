@@ -167,52 +167,65 @@ func newHandler(cfg config, ca *tls.Certificate, accessw, serverw io.Writer) (ht
 }
 
 func main() {
-	cfg, err := parseFlags(os.Args[1:], os.Stderr)
+	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
+}
+
+// run is the command: it returns the exit status, 2 for a usage error and 1 for any other failure. Unless
+// -print-ca is given, it returns only when a listener fails.
+func run(args []string, stdout, stderr io.Writer) int {
+	cfg, err := parseFlags(args, stderr)
 	if errors.Is(err, flag.ErrHelp) {
-		os.Exit(0)
+		return 0
 	}
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(2)
+		fmt.Fprintln(stderr, err)
+		return 2
 	}
 
 	l := zap.New(zapcore.NewCore(
 		zapcore.NewConsoleEncoder(log.DefaultServerLogEncoderConfig()),
-		zapcore.AddSync(os.Stderr),
+		zapcore.AddSync(stderr),
 		zapcore.InfoLevel,
 	)).Named("cli")
+	fail := func(err error) int {
+		l.Error("", zap.Error(err))
+		return 1
+	}
 
 	ca, err := loadCA(cfg)
 	if err != nil {
-		l.Fatal("", zap.Error(err))
+		return fail(err)
 	}
 	if cfg.printCA {
-		if err := writeCA(os.Stdout, ca); err != nil {
-			l.Fatal("", zap.Error(err))
+		if err := writeCA(stdout, ca); err != nil {
+			return fail(err)
 		}
-		return
+		return 0
 	}
 
-	h, err := newHandler(cfg, ca, os.Stdout, os.Stderr)
+	h, err := newHandler(cfg, ca, stdout, stderr)
 	if err != nil {
-		l.Fatal("", zap.Error(err))
+		return fail(err)
 	}
 
+	errc := make(chan error, 2)
+	httpListener, err := net.Listen("tcp", cfg.listen)
+	if err != nil {
+		return fail(err)
+	}
+	defer httpListener.Close()
 	if cfg.socks != "" {
-		ln, err := net.Listen("tcp", cfg.socks)
+		socksListener, err := net.Listen("tcp", cfg.socks)
 		if err != nil {
-			l.Fatal("", zap.Error(err))
+			return fail(err)
 		}
-		l.Info("starting SOCKS5", zap.String("listen", cfg.socks))
-		go func() {
-			l.Fatal("", zap.Error((&socks5.Server{Handler: h}).Serve(ln)))
-		}()
+		defer socksListener.Close()
+		l.Info("starting SOCKS5", zap.String("listen", socksListener.Addr().String()))
+		go func() { errc <- (&socks5.Server{Handler: h}).Serve(socksListener) }()
 	}
-
-	l.Info("starting", zap.String("listen", cfg.listen))
-	if err := http.ListenAndServe(cfg.listen, h); err != nil {
-		l.Fatal("", zap.Error(err))
-	}
+	l.Info("starting", zap.String("listen", httpListener.Addr().String()))
+	go func() { errc <- http.Serve(httpListener, h) }()
+	return fail(<-errc)
 }
 
 func registerHandler(mux *router.Router, handler http.Handler, hostnames string) error {

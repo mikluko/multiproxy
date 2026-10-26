@@ -302,3 +302,63 @@ func socksConnect(t *testing.T, server, target string) byte {
 	require.Equal(t, []byte{5, 0}, reply[:2])
 	return reply[3]
 }
+
+func TestRun(t *testing.T) {
+	t.Run("help", func(t *testing.T) {
+		require.Equal(t, 0, run([]string{"-h"}, io.Discard, io.Discard))
+	})
+	t.Run("a usage error", func(t *testing.T) {
+		var stderr bytes.Buffer
+		require.Equal(t, 2, run([]string{"-leaf-key", "dsa"}, io.Discard, &stderr))
+		require.Contains(t, stderr.String(), "-leaf-key")
+	})
+	t.Run("-print-ca", func(t *testing.T) {
+		var stdout bytes.Buffer
+		require.Equal(t, 0, run([]string{"-print-ca", "-ca-name", "Printed Root"}, &stdout, io.Discard))
+		block, _ := pem.Decode(stdout.Bytes())
+		require.NotNil(t, block)
+		cert, err := x509.ParseCertificate(block.Bytes)
+		require.NoError(t, err)
+		require.Equal(t, "Printed Root", cert.Subject.CommonName)
+	})
+	for name, args := range map[string][]string{
+		"an unreadable CA":     {"-ca-cert", filepath.Join(t.TempDir(), "ca.pem"), "-ca-key", t.TempDir()},
+		"two fallbacks":        {"-mitm", "*", "-tunnel", "*"},
+		"a bad listen address": {"-listen", "256.0.0.1:1"},
+		"a bad SOCKS address":  {"-listen", "127.0.0.1:0", "-socks", "256.0.0.1:1"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			var stderr bytes.Buffer
+			require.Equal(t, 1, run(args, io.Discard, &stderr))
+			require.NotEmpty(t, stderr.String())
+		})
+	}
+	t.Run("serves HTTP and SOCKS5", func(t *testing.T) {
+		backend := httptest.NewServer(http.HandlerFunc(echoVia))
+		defer backend.Close()
+		httpAddr, socksAddr := freeAddr(t), freeAddr(t)
+		go run([]string{"-noaccesslog", "-listen", httpAddr, "-socks", socksAddr}, io.Discard, io.Discard)
+
+		p, err := url.Parse("http://" + httpAddr)
+		require.NoError(t, err)
+		require.Eventually(t, func() bool {
+			rs, err := client(p).Get(backend.URL)
+			if err != nil {
+				return false
+			}
+			_ = rs.Body.Close()
+			return rs.StatusCode == http.StatusOK
+		}, 5*time.Second, 50*time.Millisecond)
+		require.Equal(t, byte(0), socksConnect(t, socksAddr, strings.TrimPrefix(backend.URL, "http://")))
+	})
+}
+
+// freeAddr returns a loopback address with a port that was free a moment ago.
+func freeAddr(t *testing.T) string {
+	t.Helper()
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	addr := l.Addr().String()
+	require.NoError(t, l.Close())
+	return addr
+}

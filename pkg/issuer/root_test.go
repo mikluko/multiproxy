@@ -98,3 +98,29 @@ func TestLoadOrCreate(t *testing.T) {
 		require.ErrorContains(t, err, "not a CA")
 	})
 }
+
+func TestRootErrors(t *testing.T) {
+	tmpl := issuer.RootTemplate("Test Root", "Test Org", 24*time.Hour)
+
+	t.Run("a missing directory", func(t *testing.T) {
+		dir := filepath.Join(t.TempDir(), "missing")
+		_, err := issuer.LoadOrCreate(filepath.Join(dir, "ca.pem"), filepath.Join(dir, "ca-key.pem"), tmpl)
+		require.Error(t, err)
+	})
+	t.Run("WriteFiles refuses to overwrite", func(t *testing.T) {
+		dir := t.TempDir()
+		ca, err := issuer.NewRoot(tmpl, 2048, rand.Reader)
+		require.NoError(t, err)
+		certFile, keyFile := filepath.Join(dir, "ca.pem"), filepath.Join(dir, "ca-key.pem")
+		require.NoError(t, issuer.WriteFiles(ca, certFile, keyFile))
+		require.ErrorIs(t, issuer.WriteFiles(ca, certFile, keyFile), os.ErrExist)
+	})
+	t.Run("NewRoot without randomness", func(t *testing.T) {
+		_, err := issuer.NewRoot(tmpl, 2048, failingReader{})
+		require.Error(t, err)
+	})
+}
+
+type failingReader struct{}
+
+func (failingReader) Read([]byte) (int, error) { return 0, os.ErrClosed }
