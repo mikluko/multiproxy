@@ -1,4 +1,4 @@
-FROM golang:1.15-alpine3.12 AS download
+FROM golang:1.16-alpine3.12 AS download
 
 RUN apk add --no-cache git gcc musl-dev
 
@@ -6,7 +6,7 @@ WORKDIR /usr/local/src/github.com/akabos/multiproxy
 COPY go.mod go.sum ./
 RUN go mod download
 
-FROM golang:1.15-alpine3.12 AS build
+FROM golang:1.16-alpine3.12 AS build
 
 WORKDIR /usr/local/src/github.com/akabos/multiproxy
 
