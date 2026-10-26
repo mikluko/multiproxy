@@ -4,7 +4,7 @@ go 1.26.0
 
 require (
 	github.com/google/uuid v1.6.0
-	github.com/hashicorp/golang-lru v0.6.0
+	github.com/hashicorp/golang-lru/arc/v2 v2.0.7
 	github.com/justinas/alice v1.2.0
 	github.com/mccutchen/go-httpbin/v2 v2.26.0
 	github.com/stretchr/testify v1.12.1
@@ -13,6 +13,7 @@ require (
 )
 
 require (
+	github.com/hashicorp/golang-lru/v2 v2.0.7 // indirect
 	go.uber.org/multierr v1.10.0 // indirect
 	go.yaml.in/yaml/v3 v3.0.5 // indirect
 )
