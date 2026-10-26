@@ -9,7 +9,6 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
-	"encoding/pem"
 	"fmt"
 	"io"
 	"math/big"
@@ -153,26 +152,11 @@ func (ca *SelfSignedCA) init() {
 }
 
 func (ca *SelfSignedCA) initRootCert() {
-	key, err := rsa.GenerateKey(ca.Rand, ca.RootBitSize)
+	cert, err := NewRoot(ca.RootTmpl, ca.RootBitSize, ca.Rand)
 	if err != nil {
 		panic(err)
 	}
-	cert, err := x509.CreateCertificate(ca.Rand, ca.RootTmpl, ca.RootTmpl, &key.PublicKey, key)
-	if err != nil {
-		panic(err)
-	}
-	pair, err := tls.X509KeyPair(
-		pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: cert}),
-		pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key)}),
-	)
-	if err != nil {
-		panic(err)
-	}
-	pair.Leaf, err = x509.ParseCertificate(pair.Certificate[0])
-	if err != nil {
-		panic(err)
-	}
-	ca.Cert = &pair
+	ca.Cert = cert
 }
 
 // DefaultIssuerRootBitSize defines default bit size for a self-signed root cert.
@@ -202,7 +186,6 @@ var (
 		BasicConstraintsValid: true,
 		OCSPServer:            []string{"ocsp.example.org"},
 		DNSNames:              []string{"root.example.org"},
-		SignatureAlgorithm:    x509.SHA1WithRSA,
 		KeyUsage:              x509.KeyUsageCertSign,
 	}
 

@@ -31,16 +31,32 @@ TCP level and have no control over requests or responses passing through the pro
 
 The other one is Man-in-the-Middle or MITM handler which basically implements 
 [Man-in-the-Middle attack](https://en.wikipedia.org/wiki/Man-in-the-middle_attack). With this handler the proxy have 
-full control over requests and responses. The downside is that client software have to be explicitly instructed to 
-abandon attempts to verify server certificates.
+full control over requests and responses. The downside is that a client has to trust the proxy's CA, or skip
+certificate verification.
 
 Running the server in MITM mode:
 
-    mutiproxy -mitm '*'
+    multiproxy -mitm '*'
 
-Making a request over the proxy in MITM mode:
+Making a request over the proxy in MITM mode, without verifying the certificate:
 
     curl -k -x http://127.0.0.1:8080 https://example.com
+
+### A persistent CA
+
+Without `-ca-cert` and `-ca-key` the CA is generated in memory and changes on every start. With them, it is read
+from the two PEM files, and created there when neither exists:
+
+    multiproxy -mitm '*' -ca-cert ca.pem -ca-key ca-key.pem
+
+`-ca-name` and `-ca-org` set the subject of a CA created that way. `ca.pem` is what a client trusts:
+
+    curl --cacert ca.pem -x http://127.0.0.1:8080 https://example.com
+
+`-print-ca` prints the CA certificate in use and exits.
+
+MITM certificates use RSA 2048 keys and are valid for 30 days. `-leaf-key ecdsa` switches to ECDSA P-256 keys,
+and `-leaf-validity` sets another validity.
 
 It is possible to run proxy in the mixed mode. E.g. handling some domains with MITM and others with tunneling:
 

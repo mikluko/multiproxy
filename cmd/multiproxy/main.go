@@ -1,7 +1,10 @@
 package main
 
 import (
+	"crypto/rand"
+	"crypto/tls"
 	"crypto/x509"
+	"encoding/pem"
 	"errors"
 	"flag"
 	"fmt"
@@ -31,6 +34,11 @@ type config struct {
 	tunnelHosts     string
 	leafKey         x509.PublicKeyAlgorithm
 	leafValidity    time.Duration
+	caCert          string
+	caKey           string
+	caName          string
+	caOrg           string
+	printCA         bool
 }
 
 // parseFlags reads the command line. With neither -mitm nor -tunnel given, every CONNECT host is tunnelled.
@@ -49,6 +57,11 @@ func parseFlags(args []string, output io.Writer) (config, error) {
 	fs.StringVar(&cfg.tunnelHosts, "tunnel", "", "coma-separated list of host names CONNECT requests to which will be handled with tunnel proxy")
 	fs.StringVar(&leafKey, "leaf-key", "rsa", "key algorithm of MITM certificates: rsa or ecdsa")
 	fs.DurationVar(&cfg.leafValidity, "leaf-validity", issuer.DefaultIssuerValidity, "validity of MITM certificates")
+	fs.StringVar(&cfg.caCert, "ca-cert", "", "PEM file of the CA certificate signing MITM certificates; created with -ca-key when neither exists")
+	fs.StringVar(&cfg.caKey, "ca-key", "", "PEM file of the CA private key")
+	fs.StringVar(&cfg.caName, "ca-name", issuer.DefaultIssuerRootTmpl.Subject.CommonName, "common name of a generated CA")
+	fs.StringVar(&cfg.caOrg, "ca-org", issuer.DefaultIssuerRootTmpl.Subject.Organization[0], "organization of a generated CA")
+	fs.BoolVar(&cfg.printCA, "print-ca", false, "print the CA certificate as PEM and exit")
 	if err := fs.Parse(args); err != nil {
 		return config{}, err
 	}
@@ -64,14 +77,36 @@ func parseFlags(args []string, output io.Writer) (config, error) {
 	if cfg.leafValidity <= 0 {
 		return config{}, fmt.Errorf("-leaf-validity: want a positive duration, got %s", cfg.leafValidity)
 	}
+	if (cfg.caCert == "") != (cfg.caKey == "") {
+		return config{}, errors.New("-ca-cert and -ca-key: give both or neither")
+	}
 	if cfg.mitmHosts == "" && cfg.tunnelHosts == "" {
 		cfg.tunnelHosts = "*"
 	}
 	return cfg, nil
 }
 
-// newHandler builds the proxy described by cfg, writing access logs to accessw and server logs to serverw.
-func newHandler(cfg config, accessw, serverw io.Writer) (http.Handler, error) {
+// loadCA returns the CA that signs MITM certificates: read from -ca-cert and -ca-key, created there when neither
+// exists, or generated in memory when neither flag is given.
+func loadCA(cfg config) (*tls.Certificate, error) {
+	tmpl := issuer.RootTemplate(cfg.caName, cfg.caOrg, caValidity)
+	if cfg.caCert == "" {
+		return issuer.NewRoot(tmpl, issuer.DefaultIssuerRootBitSize, rand.Reader)
+	}
+	return issuer.LoadOrCreate(cfg.caCert, cfg.caKey, tmpl)
+}
+
+// caValidity is the validity of a CA the command generates.
+const caValidity = 10 * 365 * 24 * time.Hour
+
+// writeCA writes the certificate of ca to w as PEM.
+func writeCA(w io.Writer, ca *tls.Certificate) error {
+	return pem.Encode(w, &pem.Block{Type: "CERTIFICATE", Bytes: ca.Certificate[0]})
+}
+
+// newHandler builds the proxy described by cfg, signing MITM certificates with ca, writing access logs to accessw
+// and server logs to serverw.
+func newHandler(cfg config, ca *tls.Certificate, accessw, serverw io.Writer) (http.Handler, error) {
 	if cfg.noAccessLog {
 		accessw = io.Discard
 	}
@@ -101,6 +136,7 @@ func newHandler(cfg config, accessw, serverw io.Writer) (http.Handler, error) {
 			NoXForwardedFor: cfg.noXForwardedFor,
 		}),
 		Issuer: &issuer.SelfSignedCA{
+			Cert:         ca,
 			KeyAlgorithm: cfg.leafKey,
 			Validity:     cfg.leafValidity,
 		},
@@ -135,7 +171,18 @@ func main() {
 		zapcore.InfoLevel,
 	)).Named("cli")
 
-	h, err := newHandler(cfg, os.Stdout, os.Stderr)
+	ca, err := loadCA(cfg)
+	if err != nil {
+		l.Fatal("", zap.Error(err))
+	}
+	if cfg.printCA {
+		if err := writeCA(os.Stdout, ca); err != nil {
+			l.Fatal("", zap.Error(err))
+		}
+		return
+	}
+
+	h, err := newHandler(cfg, ca, os.Stdout, os.Stderr)
 	if err != nil {
 		l.Fatal("", zap.Error(err))
 	}
