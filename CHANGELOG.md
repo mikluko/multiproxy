@@ -11,6 +11,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `headers.Rule.SetFunc` computes headers per request; an error answers the request with 502 Bad Gateway instead of forwarding it.
 
+### Fixed
+
+- Responses to intercepted requests stream to the client instead of reaching it only once complete.
+- Every request pipelined on an intercepted connection is answered, where requests after the first could be lost.
+- A client that starts its TLS handshake before reading the `CONNECT` response is intercepted instead of stalling.
+
 ## [0.4.0] - 2026-10-26
 
 ### Added

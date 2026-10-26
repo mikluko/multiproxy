@@ -2,17 +2,14 @@ package handlers
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"crypto/tls"
-	"errors"
 	"fmt"
-	"io"
-	"io/ioutil"
+	"log/slog"
 	"net"
 	"net/http"
-	"net/url"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	arc "github.com/hashicorp/golang-lru/arc/v2"
@@ -103,49 +100,93 @@ func (s *MITMHandler) ServeHTTP(rw http.ResponseWriter, rq *http.Request) {
 		return
 	}
 
-	mitmconn := mitmCounterConn{
-		Conn: conn,
-	}
+	client := &mitmCounterConn{Conn: newBufferedConn(conn, bufrw.Reader)}
 	defer func() {
 		log.WithStatusCode(rq, http.StatusOK)
-		log.WithContentLength(rq, mitmconn.bytesWritten)
+		log.WithContentLength(rq, int(client.bytesWritten.Load()))
 	}()
 
-	tlsconn := tls.Server(&mitmconn, &tls.Config{
+	tlsconn := tls.Server(client, &tls.Config{
 		Certificates: []tls.Certificate{*cert},
 	})
-	err = tlsconn.Handshake()
-	if err != nil {
+	if err := tlsconn.Handshake(); err != nil {
 		log.Warn(rq, "TLS handshake failed", "error", err)
 		return
 	}
 	defer tlsconn.Close()
 
-	for seq := uint64(1); true; seq++ {
-		err = s.roundTrip(rq.Context(), tlsconn)
-		if err != nil {
-			if errors.Is(err, io.EOF) {
-				break
-			}
-			log.Debug(rq, "sub-request failed", "sub-seq", seq, "error", err)
-			break
-		}
-	}
+	s.serve(rq, tlsconn)
 }
 
-func (s *MITMHandler) roundTrip(ctx context.Context, conn net.Conn) error {
-	rq, err := http.ReadRequest(bufio.NewReader(conn))
-	if err != nil {
-		return err
+// serve answers the requests the client sends over conn through Handler, until conn is closed, whether by the
+// server or by a handler that hijacked it. Each request gets connect's context, so that it is logged and traced
+// inside the CONNECT session.
+func (s *MITMHandler) serve(connect *http.Request, conn net.Conn) {
+	c := &closeSignalConn{Conn: conn, done: make(chan struct{})}
+	srv := &http.Server{
+		Handler: http.HandlerFunc(func(rw http.ResponseWriter, rq *http.Request) {
+			rq.URL.Scheme = "https"
+			rq.URL.Host = rq.Host
+			s.Handler.ServeHTTP(rw, rq)
+		}),
+		BaseContext: func(net.Listener) context.Context { return connect.Context() },
+		ErrorLog:    slog.NewLogLogger(log.Logger(connect).Handler(), slog.LevelDebug),
 	}
-	rq = rq.WithContext(ctx)
+	_ = srv.Serve(&singleConnListener{conn: c})
+}
 
-	rq.URL, _ = url.Parse("https://" + rq.Host + rq.URL.String())
-	rq.RemoteAddr = conn.RemoteAddr().String()
+// singleConnListener accepts conn once, then blocks until conn is closed and reports itself closed.
+type singleConnListener struct {
+	conn     *closeSignalConn
+	accepted bool
+}
 
-	rw := mitmResponseWriter{conn: &mitmNoopCloseConn{conn}}
-	s.Handler.ServeHTTP(&rw, rq)
-	return rw.Close()
+func (l *singleConnListener) Accept() (net.Conn, error) {
+	if !l.accepted {
+		l.accepted = true
+		return l.conn, nil
+	}
+	<-l.conn.done
+	return nil, net.ErrClosed
+}
+
+func (l *singleConnListener) Close() error { return nil }
+
+func (l *singleConnListener) Addr() net.Addr { return l.conn.LocalAddr() }
+
+// closeSignalConn closes done once it is closed.
+type closeSignalConn struct {
+	net.Conn
+	once sync.Once
+	done chan struct{}
+}
+
+func (c *closeSignalConn) Close() error {
+	err := c.Conn.Close()
+	c.once.Do(func() { close(c.done) })
+	return err
+}
+
+// bufferedConn reads first the bytes the hijacking reader had already buffered from the client, then conn itself.
+// Reading on through that reader instead would hand read errors, deadline aborts included, to the HTTP server that
+// owns it, which cancels the CONNECT request's context.
+type bufferedConn struct {
+	net.Conn
+	pending []byte
+}
+
+func newBufferedConn(conn net.Conn, r *bufio.Reader) *bufferedConn {
+	pending, _ := r.Peek(r.Buffered())
+	return &bufferedConn{Conn: conn, pending: append([]byte(nil), pending...)}
+}
+
+func (c *bufferedConn) Read(p []byte) (int, error) {
+	if len(c.pending) > 0 {
+		n := copy(p, c.pending)
+		c.pending = c.pending[n:]
+		return n, nil
+	}
+	return c.Conn.Read(p)
 }
 
 func (s *MITMHandler) certForRequest(rq *http.Request) (*tls.Certificate, error) {
@@ -187,82 +228,14 @@ func (s *MITMHandler) certForRequest(rq *http.Request) (*tls.Certificate, error)
 	return entry.cert, nil
 }
 
-// mitmResponseWriter implements http.ResponseWriter
-//
-// not thread-safe
-type mitmResponseWriter struct {
-	conn       net.Conn
-	body       bytes.Buffer
-	header     http.Header
-	statusCode int
-	hijacked   bool
-}
-
-// Header implements http.ResponseWriter interface
-func (rw *mitmResponseWriter) Header() http.Header {
-	if rw.header == nil {
-		rw.header = http.Header{}
-	}
-	return rw.header
-}
-
-// Write implements http.ResponseWriter interface
-func (rw *mitmResponseWriter) Write(p []byte) (int, error) {
-	// We put writes into the buffer and flush it upon response writer Close() call. It is not efficient memory-wise for
-	// large responses, but should be okay in this particular case since the underlying handler would only write
-	// directly in case of error responses which would be very small.
-	return rw.body.Write(p)
-}
-
-// WriteHeader implements http.ResponseWriter interface
-func (rw *mitmResponseWriter) WriteHeader(statusCode int) {
-	if rw.statusCode != 0 {
-		panic("spurious header write")
-	}
-	rw.statusCode = statusCode
-}
-
-func (rw *mitmResponseWriter) Close() error {
-	if rw.hijacked {
-		return nil
-	}
-	return (&http.Response{
-		ProtoMajor:       1,
-		ProtoMinor:       1,
-		StatusCode:       rw.statusCode,
-		Header:           rw.header,
-		Body:             ioutil.NopCloser(&rw.body),
-		ContentLength:    int64(rw.body.Len()),
-		TransferEncoding: []string{"identity"},
-	}).Write(rw.conn)
-}
-
-// Hijack implements http.Hijacker interface
-func (rw *mitmResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
-	if rw.hijacked {
-		panic("spurious connection hijack")
-	}
-	rw.hijacked = true
-	return rw.conn, bufio.NewReadWriter(bufio.NewReader(rw.conn), bufio.NewWriter(rw.conn)), nil
-}
-
+// mitmCounterConn counts the bytes written to the client.
 type mitmCounterConn struct {
 	net.Conn
-	bytesWritten int
+	bytesWritten atomic.Int64
 }
 
-// Write wraps net.Conn
-func (c *mitmCounterConn) Write(p []byte) (n int, err error) {
-	n, err = c.Conn.Write(p)
-	c.bytesWritten += n
-	return
-}
-
-type mitmNoopCloseConn struct {
-	net.Conn
-}
-
-// Close wraps net.Conn
-func (c *mitmNoopCloseConn) Close() error {
-	return nil
+func (c *mitmCounterConn) Write(p []byte) (int, error) {
+	n, err := c.Conn.Write(p)
+	c.bytesWritten.Add(int64(n))
+	return n, err
 }
