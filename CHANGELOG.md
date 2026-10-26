@@ -10,12 +10,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - `headers.Rule.SetFunc` computes headers per request; an error answers the request with 502 Bad Gateway instead of forwarding it.
+- `handlers.ConnectAcceptor` lets a ResponseWriter answer an accepted `CONNECT` in its own protocol; `Tunnel` and `MITMHandler` use it where present, behind `Unwrap` too.
+
+### Changed
+
+- **Breaking:** `socks5.Server` no longer offers `Hijack` on its ResponseWriter; a handler accepts the connection with `AcceptConnect` instead of hijacking it and writing `200 OK`.
 
 ### Fixed
 
 - Responses to intercepted requests stream to the client instead of reaching it only once complete.
 - Every request pipelined on an intercepted connection is answered, where requests after the first could be lost.
 - A client that starts its TLS handshake before reading the `CONNECT` response is intercepted instead of stalling.
+- A certificate that cannot be issued refuses the `CONNECT` request with 500, where the client was told the connection was established first.
 
 ## [0.4.0] - 2026-10-26
 

@@ -20,15 +20,3 @@ func TestReplyFor(t *testing.T) {
 		require.Equal(t, want, replyFor(status), "status %d", status)
 	}
 }
-
-func TestStatusOf(t *testing.T) {
-	for head, want := range map[string]int{
-		"HTTP/1.1 200 OK":                  200,
-		"HTTP/1.1 502 Bad Gateway\r\nX: y": 502,
-		"HTTP/1.1 204":                     204,
-		"garbage":                          0,
-		"HTTP/1.1 abc Not A Number":        0,
-	} {
-		require.Equal(t, want, statusOf([]byte(head)), head)
-	}
-}

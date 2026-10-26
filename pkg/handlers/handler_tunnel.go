@@ -3,7 +3,6 @@ package handlers
 import (
 	"context"
 	"errors"
-	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -48,10 +47,10 @@ func (s *Tunnel) ServeHTTP(rw http.ResponseWriter, rq *http.Request) {
 		return
 	}
 
-	hj, ok := rw.(http.Hijacker)
-	if !ok {
+	accept := connectAcceptor(rw)
+	if accept == nil {
 		s.httpError(rw, rq, http.StatusInternalServerError)
-		log.Panic(rq, "underlying http.ResponseWriter MUST implement http.Hijacker")
+		log.Panic(rq, "underlying http.ResponseWriter MUST implement http.Hijacker or ConnectAcceptor")
 		return
 	}
 
@@ -69,16 +68,13 @@ func (s *Tunnel) ServeHTTP(rw http.ResponseWriter, rq *http.Request) {
 	}
 	defer u.Close()
 
-	conn, bufrw, err := hj.Hijack() // client connection and buffered read-writer
+	conn, bufrw, err := accept()
 	if err != nil {
 		s.httpError(rw, rq, http.StatusInternalServerError)
-		log.Warn(rq, "failed to hijack client connection", "error", err)
+		log.Warn(rq, "failed to accept client connection", "error", err)
 		return
 	}
 	defer conn.Close()
-
-	_, _ = fmt.Fprintf(bufrw, "HTTP/1.1 200 OK\r\n\r\n")
-	_ = bufrw.Flush()
 	log.WithStatusCode(rq, http.StatusOK)
 
 	wg := sync.WaitGroup{}
@@ -86,14 +82,14 @@ func (s *Tunnel) ServeHTTP(rw http.ResponseWriter, rq *http.Request) {
 
 	go func() {
 		defer wg.Done()
-		_, err := s.copy(u, bufrw)
+		_, err := s.copy(u, bufrw.Reader)
 		if err != nil {
 			log.Debug(rq, "client -> upstream copy error", "error", err)
 		}
 	}()
 	go func() {
 		defer wg.Done()
-		n, err := s.copy(bufrw, u)
+		n, err := s.copy(conn, u)
 		if err != nil {
 			log.Debug(rq, "upstream -> client copy error", "error", err)
 		}

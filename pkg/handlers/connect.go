@@ -1,0 +1,55 @@
+package handlers
+
+import (
+	"bufio"
+	"io"
+	"net"
+	"net/http"
+)
+
+// ConnectAcceptor is implemented by a ResponseWriter whose client is answered in a protocol of its own, as the
+// SOCKS5 server's is. AcceptConnect tells the client that the connection to the target is established, and returns
+// the client connection with a reader holding whatever the client already sent. Tunnel and MITMHandler call it in
+// place of hijacking the connection and writing a 200 response.
+//
+// A refusal before AcceptConnect is written as an HTTP status, through WriteHeader.
+type ConnectAcceptor interface {
+	AcceptConnect() (net.Conn, *bufio.ReadWriter, error)
+}
+
+// connectAcceptor returns how to accept a CONNECT request on rw: the ConnectAcceptor rw implements, directly or behind
+// a chain of Unwrap methods, or else hijacking rw and writing a 200 response. It returns nil where rw offers neither.
+func connectAcceptor(rw http.ResponseWriter) func() (net.Conn, *bufio.ReadWriter, error) {
+	var hj http.Hijacker
+	for w := rw; w != nil; {
+		if a, ok := w.(ConnectAcceptor); ok {
+			return a.AcceptConnect
+		}
+		if h, ok := w.(http.Hijacker); ok && hj == nil {
+			hj = h
+		}
+		u, ok := w.(interface{ Unwrap() http.ResponseWriter })
+		if !ok {
+			break
+		}
+		w = u.Unwrap()
+	}
+	if hj == nil {
+		return nil
+	}
+	return func() (net.Conn, *bufio.ReadWriter, error) {
+		conn, bufrw, err := hj.Hijack()
+		if err != nil {
+			return nil, nil, err
+		}
+		if _, err := io.WriteString(bufrw, "HTTP/1.1 200 OK\r\n\r\n"); err != nil {
+			_ = conn.Close()
+			return nil, nil, err
+		}
+		if err := bufrw.Flush(); err != nil {
+			_ = conn.Close()
+			return nil, nil, err
+		}
+		return conn, bufrw, nil
+	}
+}

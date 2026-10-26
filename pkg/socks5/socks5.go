@@ -14,16 +14,15 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
-	"strings"
-	"sync"
 	"time"
 )
 
 // Server accepts SOCKS5 connections and serves each CONNECT as an HTTP CONNECT request to Handler.
 //
-// The handler accepts the connection by hijacking it and writing a 200 response, as the tunnel and MITM handlers
-// do; the server answers the client with success in place of that response. A response of 403 or 405 is answered
-// as refused by ruleset, 502 as host unreachable, 504 as TTL expired, and anything else as a general failure.
+// The handler accepts the connection through the AcceptConnect method of its ResponseWriter, which satisfies
+// handlers.ConnectAcceptor and answers the client with success. A status written before it is a refusal: 403 or 405
+// is answered as refused by ruleset, 502 as host unreachable, 504 as TTL expired, and anything else as a general
+// failure. The ResponseWriter cannot be hijacked.
 type Server struct {
 	// Handler serves the CONNECT requests.
 	Handler http.Handler
@@ -75,9 +74,9 @@ func (s *Server) ServeConn(c net.Conn) {
 		Header:     http.Header{},
 		RemoteAddr: c.RemoteAddr().String(),
 	}
-	rw := &responseWriter{conn: &conn{Conn: c, r: br}, header: http.Header{}}
+	rw := &responseWriter{conn: c, r: br, header: http.Header{}}
 	s.Handler.ServeHTTP(rw, rq)
-	if !rw.replied() {
+	if !rw.replied {
 		rw.WriteHeader(http.StatusOK)
 	}
 }
@@ -188,128 +187,57 @@ func replyFor(status int) byte {
 	}
 }
 
-// responseWriter answers the SOCKS client for a handler that writes an HTTP response. A response written before
-// Hijack is a refusal: its status picks the reply and its body is discarded.
+// responseWriter answers the SOCKS client for a handler: with success from AcceptConnect, or with the reply its status
+// maps to where the handler writes a response instead. A response body is discarded.
 type responseWriter struct {
-	conn     *conn
-	header   http.Header
-	hijacked bool
+	conn    net.Conn
+	r       *bufio.Reader
+	header  http.Header
+	replied bool
 }
 
 func (rw *responseWriter) Header() http.Header { return rw.header }
 
 func (rw *responseWriter) WriteHeader(status int) {
-	if rw.replied() || rw.hijacked {
+	if rw.replied {
 		return
 	}
 	code := replyFor(status)
 	if code == repSucceeded {
 		code = repFailure
 	}
-	rw.conn.reply(code)
+	_ = rw.reply(code)
 }
 
 func (rw *responseWriter) Write(p []byte) (int, error) {
-	if !rw.replied() {
+	if !rw.replied {
 		rw.WriteHeader(http.StatusOK)
 	}
 	return len(p), nil
 }
 
-func (rw *responseWriter) replied() bool {
-	return rw.conn.replied()
-}
-
-func (rw *responseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
-	if rw.replied() {
-		return nil, nil, errors.New("socks5: hijack after reply")
+// AcceptConnect answers the client with success and returns its connection, reading first what the handshake
+// buffered.
+func (rw *responseWriter) AcceptConnect() (net.Conn, *bufio.ReadWriter, error) {
+	if rw.replied {
+		return nil, nil, errors.New("socks5: accept after reply")
 	}
-	rw.hijacked = true
-	return rw.conn, bufio.NewReadWriter(bufio.NewReader(rw.conn), bufio.NewWriter(rw.conn)), nil
+	if err := rw.reply(repSucceeded); err != nil {
+		return nil, nil, err
+	}
+	c := &conn{Conn: rw.conn, r: rw.r}
+	return c, bufio.NewReadWriter(rw.r, bufio.NewWriter(rw.conn)), nil
 }
 
-// conn is the client connection as a hijacking handler sees it. Until the reply is sent, writes are an HTTP
-// response head, which conn turns into the reply; after it, they pass through. Reads drain what the handshake
-// buffered first.
+func (rw *responseWriter) reply(code byte) error {
+	rw.replied = true
+	return reply(rw.conn, code)
+}
+
+// conn is the client connection, reading first what the handshake buffered.
 type conn struct {
 	net.Conn
 	r *bufio.Reader
-
-	mu   sync.Mutex
-	head []byte
-	done bool
 }
 
 func (c *conn) Read(p []byte) (int, error) { return c.r.Read(p) }
-
-func (c *conn) Write(p []byte) (int, error) {
-	c.mu.Lock()
-	if c.done {
-		c.mu.Unlock()
-		return c.Conn.Write(p)
-	}
-	c.head = append(c.head, p...)
-	end := bytes.Index(c.head, []byte("\r\n\r\n"))
-	if end < 0 {
-		c.mu.Unlock()
-		return len(p), nil
-	}
-	rest := c.head[end+4:]
-	code := replyFor(statusOf(c.head[:end]))
-	c.head = nil
-	c.mu.Unlock()
-
-	if err := c.sendReply(code); err != nil {
-		return 0, err
-	}
-	if code != repSucceeded {
-		return 0, errors.New("socks5: handler refused the connection")
-	}
-	if len(rest) > 0 {
-		if _, err := c.Conn.Write(rest); err != nil {
-			return 0, err
-		}
-	}
-	return len(p), nil
-}
-
-// ReadFrom copies through Write, so that a bufio.Writer over conn passes data on as it arrives rather than
-// holding it until its buffer fills.
-func (c *conn) ReadFrom(r io.Reader) (int64, error) {
-	return io.Copy(struct{ io.Writer }{c}, r)
-}
-
-func (c *conn) reply(code byte) {
-	_ = c.sendReply(code)
-}
-
-func (c *conn) sendReply(code byte) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.done {
-		return nil
-	}
-	c.done = true
-	return reply(c.Conn, code)
-}
-
-func (c *conn) replied() bool {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.done
-}
-
-// statusOf returns the status code of an HTTP response head, or 0 where the head does not parse.
-func statusOf(head []byte) int {
-	line, _, _ := strings.Cut(string(head), "\r\n")
-	_, rest, ok := strings.Cut(line, " ")
-	if !ok {
-		return 0
-	}
-	code, _, _ := strings.Cut(rest, " ")
-	status, err := strconv.Atoi(code)
-	if err != nil {
-		return 0
-	}
-	return status
-}
