@@ -128,7 +128,10 @@ func TestServer(t *testing.T) {
 	})
 	t.Run("intercepts with MITM", func(t *testing.T) {
 		ca := &issuer.SelfSignedCA{}
-		mitm := serve(t, &router.Router{Connect: &handlers.MITMHandler{Issuer: ca}})
+		mitm := serve(t, &router.Router{Connect: &handlers.MITMHandler{
+			Issuer:  ca,
+			Handler: &handlers.HTTPHandler{Transport: tlsBackend.Client().Transport},
+		}})
 		c, code := dial(t, mitm, 1, host, tlsPort)
 		require.Equal(t, byte(0), code)
 		tc := tls.Client(c, &tls.Config{InsecureSkipVerify: true, ServerName: host})

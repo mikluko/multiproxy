@@ -63,7 +63,8 @@ func testTransport(proxy string) *http.Transport {
 }
 
 func TestRouter_ServeHTTP(t *testing.T) {
-	d := &handlers.HTTPHandler{}
+	// The upstream is reached as localhost, which the httptest certificate does not name; this test is about routing.
+	d := &handlers.HTTPHandler{Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}}
 	router := &router2.Router{
 		Default: d,
 		Connect: &handlers.MITMHandler{

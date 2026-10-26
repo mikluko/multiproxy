@@ -12,12 +12,10 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
-
-	"sarak.sh/mikluko/multiproxy/pkg/handlers"
 )
 
 func TestMITMHandler_ServeHTTP(t *testing.T) {
-	p := httptest.NewServer(&handlers.MITMHandler{})
+	p := httptest.NewServer(trustingMITM())
 	defer p.Close()
 
 	tr := testTransport(p.URL)

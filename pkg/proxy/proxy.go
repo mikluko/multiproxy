@@ -44,6 +44,12 @@ type Config struct {
 	// If nil, nothing is logged.
 	Access, Server *slog.Logger
 
+	// Transport sends plain-HTTP and intercepted requests upstream.
+	//
+	// If nil, handlers.DefaultTransport will be used, which verifies upstream TLS certificates against the system
+	// roots.
+	Transport http.RoundTripper
+
 	// TunnelDialTimeout bounds connecting to a tunnel target.
 	//
 	// If 0, DefaultTunnelDialTimeout will be used.
@@ -72,12 +78,15 @@ func New(cfg Config) (http.Handler, error) {
 	if cfg.Server == nil {
 		cfg.Server = slog.New(slog.DiscardHandler)
 	}
+	if cfg.Transport == nil {
+		cfg.Transport = handlers.DefaultTransport
+	}
 	if cfg.TunnelDialTimeout == 0 {
 		cfg.TunnelDialTimeout = DefaultTunnelDialTimeout
 	}
 
 	logged := log.Middleware(cfg.Access, cfg.Server)
-	upstream := otelhttp.NewTransport(handlers.DefaultTransport)
+	upstream := otelhttp.NewTransport(cfg.Transport)
 
 	httpChain := alice.New(logged, named("http"))
 	if !cfg.NoVia {

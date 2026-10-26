@@ -56,7 +56,7 @@ func TestNew(t *testing.T) {
 	})
 	t.Run("a MITM pattern intercepts", func(t *testing.T) {
 		ca := &issuer.SelfSignedCA{}
-		c := start(t, proxy.Config{MITM: []string{"127.0.0.1"}, Issuer: ca})
+		c := start(t, proxy.Config{MITM: []string{"127.0.0.1"}, Issuer: ca, Transport: tlsBackend.Client().Transport})
 		rs := get(t, c, tlsBackend.URL)
 		require.Equal(t, ca.Cert.Leaf.Subject.CommonName, rs.TLS.PeerCertificates[0].Issuer.CommonName)
 	})
@@ -67,7 +67,11 @@ func TestNew(t *testing.T) {
 				next.ServeHTTP(rw, rq)
 			})
 		}
-		c := start(t, proxy.Config{MITM: []string{"127.0.0.1"}, Middleware: []func(http.Handler) http.Handler{setTest}})
+		c := start(t, proxy.Config{
+			MITM:       []string{"127.0.0.1"},
+			Middleware: []func(http.Handler) http.Handler{setTest},
+			Transport:  tlsBackend.Client().Transport,
+		})
 		require.Equal(t, "yes", get(t, c, backend.URL).Header.Get("X-Seen-Test"))
 		require.Equal(t, "yes", get(t, c, tlsBackend.URL).Header.Get("X-Seen-Test"))
 	})
