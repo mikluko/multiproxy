@@ -16,6 +16,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - The Docker image is no longer published.
 
+### Fixed
+
+- MITM certificates name the requested hostname as a subject alternative name, so Go clients accept them.
+
 ## [0.3.1] - 2021-04-29
 
 ### Removed

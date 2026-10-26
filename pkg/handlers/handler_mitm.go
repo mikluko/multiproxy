@@ -16,7 +16,6 @@ import (
 
 	arc "github.com/hashicorp/golang-lru/arc/v2"
 	"go.uber.org/zap"
-	"golang.org/x/net/publicsuffix"
 
 	"sarak.sh/mikluko/multiproxy/pkg/issuer"
 	"sarak.sh/mikluko/multiproxy/pkg/middleware/log"
@@ -151,23 +150,18 @@ func (s *MITMHandler) roundTrip(ctx context.Context, conn net.Conn) error {
 func (s *MITMHandler) certForRequest(rq *http.Request) (*tls.Certificate, error) {
 	var (
 		hostname    = rq.URL.Hostname()
-		cn          string
+		cn          = hostname
 		dnsnames    []string
 		ipaddresses []net.IP
 		err         error
 		entry       *certCacheEntry
 	)
 
-	tldplus, err := publicsuffix.EffectiveTLDPlusOne(hostname)
-	if err != nil {
-		cn = tldplus
-		dnsnames = append(dnsnames, tldplus, "."+tldplus)
-	} else {
-		cn = hostname
-	}
 	if ip := net.ParseIP(hostname); ip != nil {
 		cn = ip.String()
-		ipaddresses = append(ipaddresses, ip)
+		ipaddresses = []net.IP{ip}
+	} else {
+		dnsnames = []string{hostname}
 	}
 
 	s.certCacheMux.Lock()
