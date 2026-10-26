@@ -11,10 +11,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `headers.Rule.SetFunc` computes headers per request; an error answers the request with 502 Bad Gateway instead of forwarding it.
 - `handlers.ConnectAcceptor` lets a ResponseWriter answer an accepted `CONNECT` in its own protocol; `Tunnel` and `MITMHandler` use it where present, behind `Unwrap` too.
+- `issuer.Cache` keeps the certificates another Issuer issues, per common name, and issues again past `NotAfter`.
 
 ### Changed
 
 - **Breaking:** `socks5.Server` no longer offers `Hijack` on its ResponseWriter; a handler accepts the connection with `AcceptConnect` instead of hijacking it and writing `200 OK`.
+- **Breaking:** `MITMHandler.CertCacheSize` is removed and `MITMHandler` keeps no certificates itself; an Issuer you set is called on every `CONNECT` unless you wrap it in `issuer.Cache`.
 
 ### Fixed
 

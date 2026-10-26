@@ -8,9 +8,6 @@ import (
 	"net"
 	"net/http"
 	"sync"
-	"time"
-
-	arc "github.com/hashicorp/golang-lru/arc/v2"
 
 	"sarak.sh/mikluko/multiproxy/pkg/issuer"
 	"sarak.sh/mikluko/multiproxy/pkg/middleware/log"
@@ -25,26 +22,13 @@ type MITMHandler struct {
 	// If nil, zero value of HTTPProxy will be used.
 	Handler http.Handler
 
-	// Issuer specifies optional certificate issuer.
+	// Issuer issues a certificate for each intercepted host, on every CONNECT request; wrap it in issuer.Cache to
+	// keep the certificates.
 	//
-	// If Issuer is nil, issuer.SelfSignedCA will be used.
+	// If Issuer is nil, an issuer.Cache of an issuer.SelfSignedCA will be used.
 	Issuer issuer.Issuer
 
-	// CertCacheSize specifies the size of certificate cache used by the proxy. A cached certificate past its
-	// NotAfter is issued again.
-	//
-	// If CertCacheSize is 0, platform-specific max int value will be used.
-	CertCacheSize int
-
 	once sync.Once
-
-	certCache    *arc.ARCCache[string, *certCacheEntry]
-	certCacheMux sync.Mutex
-}
-
-type certCacheEntry struct {
-	cert *tls.Certificate
-	mux  sync.Mutex
 }
 
 func (s *MITMHandler) init() {
@@ -52,12 +36,8 @@ func (s *MITMHandler) init() {
 		s.Handler = &HTTPHandler{}
 	}
 	if s.Issuer == nil {
-		s.Issuer = &issuer.SelfSignedCA{}
+		s.Issuer = &issuer.Cache{Issuer: &issuer.SelfSignedCA{}}
 	}
-	if s.CertCacheSize == 0 {
-		s.CertCacheSize = int(^uint(0) >> 1)
-	}
-	s.certCache, _ = arc.NewARC[string, *certCacheEntry](s.CertCacheSize)
 }
 
 func (s *MITMHandler) httpError(rw http.ResponseWriter, code int) {
@@ -178,40 +158,9 @@ func (c *bufferedConn) Read(p []byte) (int, error) {
 }
 
 func (s *MITMHandler) certForRequest(rq *http.Request) (*tls.Certificate, error) {
-	var (
-		hostname    = rq.URL.Hostname()
-		cn          = hostname
-		dnsnames    []string
-		ipaddresses []net.IP
-		err         error
-		entry       *certCacheEntry
-	)
-
+	hostname := rq.URL.Hostname()
 	if ip := net.ParseIP(hostname); ip != nil {
-		cn = ip.String()
-		ipaddresses = []net.IP{ip}
-	} else {
-		dnsnames = []string{hostname}
+		return s.Issuer.Issue(ip.String(), nil, []net.IP{ip})
 	}
-
-	s.certCacheMux.Lock()
-	if x, ok := s.certCache.Get(cn); ok {
-		entry = x
-	} else {
-		entry = &certCacheEntry{}
-		s.certCache.Add(cn, entry)
-	}
-	entry.mux.Lock()
-	defer entry.mux.Unlock()
-
-	s.certCacheMux.Unlock()
-
-	if entry.cert == nil || !time.Now().Before(entry.cert.Leaf.NotAfter) {
-		entry.cert, err = s.Issuer.Issue(cn, dnsnames, ipaddresses)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	return entry.cert, nil
+	return s.Issuer.Issue(hostname, []string{hostname}, nil)
 }
