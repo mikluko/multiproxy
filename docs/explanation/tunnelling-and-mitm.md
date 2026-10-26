@@ -14,10 +14,10 @@ nothing in trust and breaks no client.
 The price is that the proxy sees only a host, a port and a byte count. It cannot log a URL, rewrite a header or
 refuse one path while allowing another.
 
-## Interception
+## MITM
 
-Interception, or man-in-the-middle, ends the client's TLS session at the proxy. multiproxy issues a certificate for
-the requested host on the spot, signed by its own CA, reads the requests inside, serves each through its HTTP
+MITM, or man-in-the-middle, ends the client's TLS session at the proxy. multiproxy issues a leaf certificate
+for the requested host on the spot, signed by its proxy CA, reads the requests inside, serves each through its HTTP
 handler, and opens a TLS connection of its own to the real server. Everything the proxy does to plain HTTP, it can
 now do to HTTPS: log the URL, rewrite headers, attach a trace.
 
@@ -26,7 +26,7 @@ impersonate any host to every client that trusts it, which is why the key file i
 alone, and why a CA kept on disk deserves the care of any other credential. Clients that pin certificates, or ship
 their own trust store, refuse an intercepted connection however the CA is installed.
 
-Interception also replaces the client's view of the server with the proxy's. The client sees multiproxy's
+MITM also replaces the client's view of the server with the proxy's. The client sees multiproxy's
 certificate and never the real server's, so the client's own verification of the server is gone. multiproxy verifies
 the real server's certificate in its place, against the system roots, and answers `502 Bad Gateway` where it does
 not verify. The client can no longer tell which roots that was, or see the server's certificate for itself, and

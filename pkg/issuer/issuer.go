@@ -29,7 +29,7 @@ type SelfSignedCA struct {
 	// If nil, a self-signed cert will be generated.
 	Cert *tls.Certificate
 
-	// KeyAlgorithm selects the algorithm of issued certificate keys: x509.RSA, or x509.ECDSA for P-256.
+	// KeyAlgorithm selects the algorithm of leaf certificate keys: x509.RSA, or x509.ECDSA for P-256.
 	// Issue fails on any other value.
 	//
 	// If 0, x509.RSA will be used.
@@ -40,22 +40,22 @@ type SelfSignedCA struct {
 	// If 0, DefaultIssuerBitSize will be used.
 	BitSize int
 
-	// Validity is how long an issued certificate stays valid.
+	// Validity is how long a leaf certificate stays valid.
 	//
 	// If 0, DefaultIssuerValidity will be used.
 	Validity time.Duration
 
-	// RootBitSize defines bit size for self-signed root certificate key generation.
+	// RootBitSize defines bit size for the key of a generated proxy CA.
 	//
 	// If 0, DefaultIssuerRootBitSize will be used.
 	RootBitSize int
 
-	// Tmpl is a template for issued certificates.
+	// Tmpl is a template for leaf certificates.
 	//
 	// If nil, DefaultIssuerTmpl will be used.
 	Tmpl *x509.Certificate
 
-	// RootTmpl is a template for self-signed root certificate.
+	// RootTmpl is a template for a generated proxy CA.
 	//
 	// If nil, DefaultIssuerRootTmpl will be used.
 	RootTmpl *x509.Certificate
@@ -159,17 +159,17 @@ func (ca *SelfSignedCA) initRootCert() {
 	ca.Cert = cert
 }
 
-// DefaultIssuerRootBitSize defines default bit size for a self-signed root cert.
+// DefaultIssuerRootBitSize defines default bit size for the key of a generated proxy CA.
 const DefaultIssuerRootBitSize = 2048
 
 // DefaultIssuerBitSize defines default bit size for issued RSA keys.
 const DefaultIssuerBitSize = 2048
 
-// DefaultIssuerValidity is the default validity of issued certificates.
+// DefaultIssuerValidity is the default validity of leaf certificates.
 const DefaultIssuerValidity = 30 * 24 * time.Hour
 
 var (
-	// DefaultIssuerRootTmpl is the default template for self-signed root CA certificate.
+	// DefaultIssuerRootTmpl is the default template for a generated proxy CA.
 	DefaultIssuerRootTmpl = x509.Certificate{
 		SerialNumber: big.NewInt(1),
 		Issuer: pkix.Name{
@@ -189,7 +189,7 @@ var (
 		KeyUsage:              x509.KeyUsageCertSign,
 	}
 
-	// DefaultIssuerTmpl is the default template for issued certificates.
+	// DefaultIssuerTmpl is the default template for leaf certificates.
 	DefaultIssuerTmpl = x509.Certificate{
 		SerialNumber: big.NewInt(1),
 		Subject: pkix.Name{

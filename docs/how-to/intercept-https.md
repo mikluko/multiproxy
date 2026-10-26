@@ -39,9 +39,9 @@ To hand the certificate to someone else without giving them the files, print it:
 multiproxy -print-ca -ca-cert <dir>/ca.pem -ca-key <dir>/ca-key.pem > multiproxy-ca.pem
 ```
 
-## Change the certificates multiproxy issues
+## Change the leaf certificates
 
-The certificates multiproxy issues for intercepted hosts use RSA 2048 keys and are valid for 30 days.
+The leaf certificates multiproxy issues for intercepted hosts use RSA 2048 keys and are valid for 30 days.
 
 - To use ECDSA P-256 keys, which are cheaper to generate per host, add `-leaf-key ecdsa`.
 - To change the validity, add `-leaf-validity` with a duration, for example `-leaf-validity 168h`.
@@ -58,5 +58,5 @@ multiproxy verifies the certificate of each intercepted host against the system 
 ## What's next
 
 - [Command-line reference](../reference/command-line.md) lists every flag and the host pattern syntax.
-- [About tunnelling and MITM](../explanation/tunnelling-and-mitm.md) covers what interception costs and when to
+- [About tunnelling and MITM](../explanation/tunnelling-and-mitm.md) covers what MITM costs and when to
   avoid it.
