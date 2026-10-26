@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `headers.Rule.SetFunc` computes headers per request; an error answers the request with 502 Bad Gateway instead of forwarding it.
+
 ## [0.4.0] - 2026-10-26
 
 ### Added
