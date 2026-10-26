@@ -1,0 +1,69 @@
+name: Release
+
+# A push to main whose newest CHANGELOG entry names an untagged version cuts
+# that version. Nothing else tags a release.
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  ci:
+    uses: ./.forgejo/workflows/ci.yaml
+
+  release:
+    needs: ci
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - id: changelog
+        uses: https://forge.sarak.sh/actions/changelog@v1
+        with:
+          off: oci-incompatible-version
+          error: prerelease-entry
+
+      - name: Cut the tag
+        if: steps.changelog.outputs.due == 'true'
+        env:
+          VERSION: ${{ steps.changelog.outputs.version }}
+        run: |
+          git tag "v$VERSION"
+          git push origin "refs/tags/v$VERSION"
+
+      - name: Publish the release
+        if: steps.changelog.outputs.due == 'true'
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.changelog.outputs.version }}
+          NOTES: ${{ steps.changelog.outputs.notes }}
+        run: |
+          tag="v$VERSION"
+          api="${GITHUB_API_URL:-$GITHUB_SERVER_URL/api/v1}/repos/$GITHUB_REPOSITORY"
+          printf '%s\n' "$NOTES" >"$RUNNER_TEMP/notes.md"
+          jq -n --arg tag "$tag" --rawfile body "$RUNNER_TEMP/notes.md" \
+            '{tag_name: $tag, name: $tag, body: $body}' >"$RUNNER_TEMP/release.json"
+          # Forgejo records its own release for a pushed tag asynchronously; a
+          # request racing that record fails on the unique tag, and a retry
+          # after it exists turns it into this release.
+          for attempt in 1 2 3 4 5 6; do
+            if curl -fsS -X POST "$api/releases" \
+              -H "Authorization: token $TOKEN" \
+              -H 'Content-Type: application/json' \
+              --data @"$RUNNER_TEMP/release.json" >/dev/null; then
+              echo "Released **$tag**." >>"$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            echo "attempt $attempt: could not create the release for $tag"
+            sleep 5
+          done
+          exit 1

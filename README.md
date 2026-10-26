@@ -76,3 +76,10 @@ If that is not what you want, you have to explicitly disable that behaviour:
 
 * Examples
 * Better test coverage
+
+## Releasing
+
+`CHANGELOG.md` decides releases. Work lands on `main` through pull requests from feature branches.
+To release, a pull request renames `## [Unreleased]` to `## [X.Y.Z] - YYYY-MM-DD` and opens a fresh
+`## [Unreleased]` above it. Merging it tags `vX.Y.Z` and publishes the release with that entry as
+its notes.
