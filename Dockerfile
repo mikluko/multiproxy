@@ -15,7 +15,7 @@ COPY ./ ./
 
 RUN go build -o /usr/local/bin/multiproxy github.com/akabos/multiproxy/cmd/multiproxy
 
-FROM alpine:3.12
+FROM alpine:3.24
 
 RUN apk add --no-cache dumb-init ca-certificates
 
