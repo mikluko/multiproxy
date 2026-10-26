@@ -15,6 +15,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `-ca-name` and `-ca-org` set the subject of a generated CA.
 - `-print-ca` prints the CA certificate as PEM and exits.
 - `issuer.RootTemplate`, `issuer.NewRoot`, `issuer.LoadOrCreate` and `issuer.WriteFiles` create, read and write a CA.
+- `-set-header` and `-del-header` set and strip headers on plain-HTTP and MITM requests to matching hosts.
+- The `headers` middleware package rewrites request headers per host pattern.
+- `router.MatchHost` matches a hostname against a host pattern.
 
 ### Changed
 

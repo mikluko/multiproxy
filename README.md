@@ -77,6 +77,39 @@ If that is not what you want, you have to explicitly disable that behaviour:
 
     multiproxy -novia -noxforwardedfor
 
+## Rewriting headers
+
+`-set-header HOST=Name: value` sets a header, replacing any value the client sent, and `-del-header HOST=Name`
+strips one. `HOST` is a pattern as in `-mitm`, or `*` for every host. Both flags repeat, and every matching rule
+applies in the order given:
+
+    multiproxy -mitm api.example.com -set-header 'api.example.com=Authorization: Bearer secret' -del-header '*=Cookie'
+
+The rules reach plain-HTTP requests and requests intercepted by MITM. A tunnelled connection is opaque to the
+proxy and passes unchanged.
+
+## Library use
+
+The packages under `pkg/` compose into a proxy of your own. `MITMHandler.Handler` serves every request intercepted
+from a `CONNECT` session, so any middleware wrapped around it sees and can change those requests. This proxy
+replaces the `Authorization` header on requests to `api.example.com`, plain or intercepted:
+
+```go
+rewrite := headers.Rewrite(headers.Rule{
+	Host: "api.example.com",
+	Set:  http.Header{"Authorization": {"Bearer " + os.Getenv("API_TOKEN")}},
+})
+
+r := &router.Router{
+	Default: rewrite(&handlers.HTTPHandler{}),
+}
+r.HandleConnectHost("api.example.com", &handlers.MITMHandler{
+	Handler: rewrite(&handlers.HTTPHandler{}),
+})
+
+_ = http.ListenAndServe("127.0.0.1:8080", r)
+```
+
 ## Goals
 
 * performance

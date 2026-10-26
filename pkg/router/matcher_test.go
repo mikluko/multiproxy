@@ -33,3 +33,21 @@ func TestMatcher(t *testing.T) {
 		require.False(t, m.matches("example.com"))
 	})
 }
+
+func TestMatchHost(t *testing.T) {
+	for _, c := range []struct {
+		pattern, host string
+		want          bool
+	}{
+		{"*", "anything.test", true},
+		{"example.com", "example.com", true},
+		{"example.com", "www.example.com", false},
+		{".example.com", "example.com", true},
+		{".example.com", "a.b.example.com", true},
+		{".example.com", "badexample.com", false},
+		{"127.0.0.1", "127.0.0.1", true},
+		{"127.0.0.1", "127.0.0.2", false},
+	} {
+		require.Equal(t, c.want, MatchHost(c.pattern, c.host), "%s ~ %s", c.pattern, c.host)
+	}
+}
