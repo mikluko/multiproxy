@@ -1,15 +1,18 @@
 package main
 
 import (
+	"bytes"
 	"crypto/ecdsa"
 	"crypto/rsa"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/pem"
 	"flag"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -47,6 +50,10 @@ func TestParseFlags(t *testing.T) {
 	t.Run("non-positive leaf validity", func(t *testing.T) {
 		_, err := parseFlags([]string{"-leaf-validity", "0s"}, io.Discard)
 		require.ErrorContains(t, err, "-leaf-validity")
+	})
+	t.Run("ca-cert without ca-key", func(t *testing.T) {
+		_, err := parseFlags([]string{"-ca-cert", "ca.pem"}, io.Discard)
+		require.ErrorContains(t, err, "-ca-key")
 	})
 	t.Run("help", func(t *testing.T) {
 		_, err := parseFlags([]string{"-h"}, io.Discard)
@@ -103,7 +110,7 @@ func TestNewHandler(t *testing.T) {
 	t.Run("two fallback handlers", func(t *testing.T) {
 		cfg, err := parseFlags([]string{"-mitm", "*", "-tunnel", "*"}, io.Discard)
 		require.NoError(t, err)
-		_, err = newHandler(cfg, io.Discard, io.Discard)
+		_, err = newHandler(cfg, nil, io.Discard, io.Discard)
 		require.Error(t, err)
 	})
 }
@@ -119,7 +126,9 @@ func proxy(t *testing.T, args ...string) *url.URL {
 	t.Helper()
 	cfg, err := parseFlags(append([]string{"-noaccesslog"}, args...), io.Discard)
 	require.NoError(t, err)
-	h, err := newHandler(cfg, io.Discard, io.Discard)
+	ca, err := loadCA(cfg)
+	require.NoError(t, err)
+	h, err := newHandler(cfg, ca, io.Discard, io.Discard)
 	require.NoError(t, err)
 	s := httptest.NewServer(h)
 	t.Cleanup(s.Close)
@@ -142,4 +151,54 @@ func get(t *testing.T, p *url.URL, target string) *http.Response {
 	t.Cleanup(func() { _ = rs.Body.Close() })
 	_, _ = io.Copy(io.Discard, rs.Body)
 	return rs
+}
+
+func TestLoadCA(t *testing.T) {
+	t.Run("in memory, named by -ca-name and -ca-org", func(t *testing.T) {
+		cfg, err := parseFlags([]string{"-ca-name", "Test Root", "-ca-org", "Test Org"}, io.Discard)
+		require.NoError(t, err)
+		ca, err := loadCA(cfg)
+		require.NoError(t, err)
+		require.Equal(t, "Test Root", ca.Leaf.Subject.CommonName)
+		require.Equal(t, []string{"Test Org"}, ca.Leaf.Subject.Organization)
+	})
+	t.Run("persisted, then trusted by a verifying client", func(t *testing.T) {
+		dir := t.TempDir()
+		args := []string{"-ca-cert", filepath.Join(dir, "ca.pem"), "-ca-key", filepath.Join(dir, "ca-key.pem")}
+		cfg, err := parseFlags(args, io.Discard)
+		require.NoError(t, err)
+		first, err := loadCA(cfg)
+		require.NoError(t, err)
+		second, err := loadCA(cfg)
+		require.NoError(t, err)
+		require.True(t, first.Leaf.Equal(second.Leaf))
+
+		backend := httptest.NewTLSServer(http.HandlerFunc(echoVia))
+		defer backend.Close()
+		roots := x509.NewCertPool()
+		roots.AddCert(first.Leaf)
+		c := &http.Client{Transport: &http.Transport{
+			Proxy:           http.ProxyURL(proxy(t, append(args, "-mitm", "127.0.0.1")...)),
+			TLSClientConfig: &tls.Config{RootCAs: roots},
+		}}
+		rs, err := c.Get(backend.URL)
+		require.NoError(t, err)
+		defer rs.Body.Close()
+		require.Equal(t, http.StatusOK, rs.StatusCode)
+	})
+}
+
+func TestWriteCA(t *testing.T) {
+	cfg, err := parseFlags(nil, io.Discard)
+	require.NoError(t, err)
+	ca, err := loadCA(cfg)
+	require.NoError(t, err)
+
+	var buf bytes.Buffer
+	require.NoError(t, writeCA(&buf, ca))
+	block, rest := pem.Decode(buf.Bytes())
+	require.NotNil(t, block)
+	require.Empty(t, rest)
+	require.Equal(t, "CERTIFICATE", block.Type)
+	require.Equal(t, ca.Certificate[0], block.Bytes)
 }

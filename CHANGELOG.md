@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `-leaf-key` selects RSA or ECDSA P-256 keys for MITM certificates, and `SelfSignedCA.KeyAlgorithm` does the same in the library.
 - `-leaf-validity` and `SelfSignedCA.Validity` set how long MITM certificates stay valid.
+- `-ca-cert` and `-ca-key` read the CA from PEM files, and create both when neither exists.
+- `-ca-name` and `-ca-org` set the subject of a generated CA.
+- `-print-ca` prints the CA certificate as PEM and exits.
+- `issuer.RootTemplate`, `issuer.NewRoot`, `issuer.LoadOrCreate` and `issuer.WriteFiles` create, read and write a CA.
 
 ### Changed
 
@@ -28,6 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - MITM certificate keys honour `SelfSignedCA.BitSize`, which defaults to 2048 bits instead of 1024.
 - MITM certificates are valid for 30 days by default instead of 10 years, and are issued again once expired.
 - MITM certificates carry random serial numbers instead of all sharing serial 1.
+- A generated CA is signed with SHA-256 instead of SHA-1, and carries a random serial number.
 
 ## [0.3.1] - 2021-04-29
 
