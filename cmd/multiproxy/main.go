@@ -9,6 +9,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"strings"
@@ -24,6 +25,7 @@ import (
 	"sarak.sh/mikluko/multiproxy/pkg/middleware/log"
 	"sarak.sh/mikluko/multiproxy/pkg/middleware/via"
 	"sarak.sh/mikluko/multiproxy/pkg/router"
+	"sarak.sh/mikluko/multiproxy/pkg/socks5"
 )
 
 type config struct {
@@ -41,6 +43,7 @@ type config struct {
 	caOrg           string
 	printCA         bool
 	headerRules     []headers.Rule
+	socks           string
 }
 
 // parseFlags reads the command line. With neither -mitm nor -tunnel given, every CONNECT host is tunnelled.
@@ -52,6 +55,7 @@ func parseFlags(args []string, output io.Writer) (config, error) {
 	)
 	fs.SetOutput(output)
 	fs.StringVar(&cfg.listen, "listen", "127.0.0.1:8080", "interface and port to bind server to")
+	fs.StringVar(&cfg.socks, "socks", "", "interface and port of a SOCKS5 listener routed by the same rules; none when empty")
 	fs.BoolVar(&cfg.noVia, "novia", false, "proxy will not add/update Via header")
 	fs.BoolVar(&cfg.noXForwardedFor, "noxforwardedfor", false, "proxy will not add/update X-Forwarded-For header")
 	fs.BoolVar(&cfg.noAccessLog, "noaccesslog", false, "disable access logging")
@@ -192,6 +196,17 @@ func main() {
 	h, err := newHandler(cfg, ca, os.Stdout, os.Stderr)
 	if err != nil {
 		l.Fatal("", zap.Error(err))
+	}
+
+	if cfg.socks != "" {
+		ln, err := net.Listen("tcp", cfg.socks)
+		if err != nil {
+			l.Fatal("", zap.Error(err))
+		}
+		l.Info("starting SOCKS5", zap.String("listen", cfg.socks))
+		go func() {
+			l.Fatal("", zap.Error((&socks5.Server{Handler: h}).Serve(ln)))
+		}()
 	}
 
 	l.Info("starting", zap.String("listen", cfg.listen))

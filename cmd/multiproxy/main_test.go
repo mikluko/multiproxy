@@ -9,10 +9,13 @@ import (
 	"encoding/pem"
 	"flag"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -20,6 +23,7 @@ import (
 
 	"sarak.sh/mikluko/multiproxy/pkg/issuer"
 	"sarak.sh/mikluko/multiproxy/pkg/middleware/headers"
+	"sarak.sh/mikluko/multiproxy/pkg/socks5"
 )
 
 func TestParseFlags(t *testing.T) {
@@ -78,6 +82,11 @@ func TestParseFlags(t *testing.T) {
 			require.ErrorContains(t, err, bad[0])
 		})
 	}
+	t.Run("socks", func(t *testing.T) {
+		cfg, err := parseFlags([]string{"-socks", "127.0.0.1:1080"}, io.Discard)
+		require.NoError(t, err)
+		require.Equal(t, "127.0.0.1:1080", cfg.socks)
+	})
 	t.Run("help", func(t *testing.T) {
 		_, err := parseFlags([]string{"-h"}, io.Discard)
 		require.ErrorIs(t, err, flag.ErrHelp)
@@ -241,4 +250,55 @@ func TestWriteCA(t *testing.T) {
 	require.Empty(t, rest)
 	require.Equal(t, "CERTIFICATE", block.Type)
 	require.Equal(t, ca.Certificate[0], block.Bytes)
+}
+
+func TestSOCKS(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(echoVia))
+	defer backend.Close()
+	target := strings.TrimPrefix(backend.URL, "http://")
+
+	socks := func(t *testing.T, args ...string) string {
+		t.Helper()
+		cfg, err := parseFlags(append([]string{"-noaccesslog"}, args...), io.Discard)
+		require.NoError(t, err)
+		ca, err := loadCA(cfg)
+		require.NoError(t, err)
+		h, err := newHandler(cfg, ca, io.Discard, io.Discard)
+		require.NoError(t, err)
+		l, err := net.Listen("tcp", "127.0.0.1:0")
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = l.Close() })
+		go func() { _ = (&socks5.Server{Handler: h}).Serve(l) }()
+		return l.Addr().String()
+	}
+
+	t.Run("a tunnelled host", func(t *testing.T) {
+		require.Equal(t, byte(0), socksConnect(t, socks(t), target))
+	})
+	t.Run("a host the rules refuse", func(t *testing.T) {
+		require.Equal(t, byte(2), socksConnect(t, socks(t, "-mitm", "example.com"), target))
+	})
+}
+
+// socksConnect asks the SOCKS5 server for a CONNECT to target, an IPv4 host:port, and returns the reply code.
+func socksConnect(t *testing.T, server, target string) byte {
+	t.Helper()
+	host, port, err := net.SplitHostPort(target)
+	require.NoError(t, err)
+	p, err := strconv.Atoi(port)
+	require.NoError(t, err)
+
+	c, err := net.DialTimeout("tcp", server, time.Second)
+	require.NoError(t, err)
+	defer c.Close()
+	require.NoError(t, c.SetDeadline(time.Now().Add(5*time.Second)))
+	rq := append([]byte{5, 1, 0, 5, 1, 0, 1}, net.ParseIP(host).To4()...)
+	rq = append(rq, byte(p>>8), byte(p))
+	_, err = c.Write(rq)
+	require.NoError(t, err)
+	reply := make([]byte, 12)
+	_, err = io.ReadFull(c, reply)
+	require.NoError(t, err)
+	require.Equal(t, []byte{5, 0}, reply[:2])
+	return reply[3]
 }

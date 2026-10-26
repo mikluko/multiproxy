@@ -1,0 +1,315 @@
+// Package socks5 is a SOCKS5 server, RFC 1928, that hands each connection to an http.Handler as a CONNECT
+// request, so that SOCKS clients are routed by the same rules as HTTP proxy clients.
+//
+// Only the CONNECT command and the no-authentication method are supported.
+package socks5
+
+import (
+	"bufio"
+	"bytes"
+	"encoding/binary"
+	"errors"
+	"io"
+	"net"
+	"net/http"
+	"net/url"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+)
+
+// Server accepts SOCKS5 connections and serves each CONNECT as an HTTP CONNECT request to Handler.
+//
+// The handler accepts the connection by hijacking it and writing a 200 response, as the tunnel and MITM handlers
+// do; the server answers the client with success in place of that response. A response of 403 or 405 is answered
+// as refused by ruleset, 502 as host unreachable, 504 as TTL expired, and anything else as a general failure.
+type Server struct {
+	// Handler serves the CONNECT requests.
+	Handler http.Handler
+
+	// HandshakeTimeout bounds the negotiation before the request reaches Handler.
+	//
+	// If 0, DefaultHandshakeTimeout will be used.
+	HandshakeTimeout time.Duration
+}
+
+// DefaultHandshakeTimeout is the default bound on a client's negotiation.
+const DefaultHandshakeTimeout = 10 * time.Second
+
+// Serve accepts connections on l and serves each in its own goroutine. It returns the error that stops Accept.
+func (s *Server) Serve(l net.Listener) error {
+	for {
+		c, err := l.Accept()
+		if err != nil {
+			return err
+		}
+		go s.ServeConn(c)
+	}
+}
+
+// ServeConn serves one SOCKS5 connection and closes it.
+func (s *Server) ServeConn(c net.Conn) {
+	defer c.Close()
+
+	timeout := s.HandshakeTimeout
+	if timeout == 0 {
+		timeout = DefaultHandshakeTimeout
+	}
+	_ = c.SetDeadline(time.Now().Add(timeout))
+	br := bufio.NewReader(c)
+	target, err := handshake(br, c)
+	if err != nil {
+		return
+	}
+	_ = c.SetDeadline(time.Time{})
+
+	rq := &http.Request{
+		Method:     http.MethodConnect,
+		URL:        &url.URL{Host: target},
+		Host:       target,
+		RequestURI: target,
+		Proto:      "HTTP/1.1",
+		ProtoMajor: 1,
+		ProtoMinor: 1,
+		Header:     http.Header{},
+		RemoteAddr: c.RemoteAddr().String(),
+	}
+	rw := &responseWriter{conn: &conn{Conn: c, r: br}, header: http.Header{}}
+	s.Handler.ServeHTTP(rw, rq)
+	if !rw.replied() {
+		rw.WriteHeader(http.StatusOK)
+	}
+}
+
+const (
+	version         = 5
+	methodNoAuth    = 0
+	methodNone      = 0xff
+	cmdConnect      = 1
+	atypIPv4        = 1
+	atypDomain      = 3
+	atypIPv6        = 4
+	repSucceeded    = 0
+	repFailure      = 1
+	repNotAllowed   = 2
+	repUnreachable  = 4
+	repTTLExpired   = 6
+	repCmdNotSupp   = 7
+	repAtypNotSuppl = 8
+)
+
+var errProtocol = errors.New("socks5: protocol error")
+
+// handshake negotiates the method and reads the request, answering errors itself. It returns the target as
+// host:port.
+func handshake(r *bufio.Reader, w io.Writer) (string, error) {
+	head := make([]byte, 2)
+	if _, err := io.ReadFull(r, head); err != nil {
+		return "", err
+	}
+	if head[0] != version {
+		return "", errProtocol
+	}
+	methods := make([]byte, head[1])
+	if _, err := io.ReadFull(r, methods); err != nil {
+		return "", err
+	}
+	if bytes.IndexByte(methods, methodNoAuth) < 0 {
+		_, _ = w.Write([]byte{version, methodNone})
+		return "", errProtocol
+	}
+	if _, err := w.Write([]byte{version, methodNoAuth}); err != nil {
+		return "", err
+	}
+
+	rq := make([]byte, 4)
+	if _, err := io.ReadFull(r, rq); err != nil {
+		return "", err
+	}
+	if rq[0] != version {
+		return "", errProtocol
+	}
+	if rq[1] != cmdConnect {
+		_ = reply(w, repCmdNotSupp)
+		return "", errProtocol
+	}
+	var host string
+	switch rq[3] {
+	case atypIPv4, atypIPv6:
+		ip := make(net.IP, 4)
+		if rq[3] == atypIPv6 {
+			ip = make(net.IP, 16)
+		}
+		if _, err := io.ReadFull(r, ip); err != nil {
+			return "", err
+		}
+		host = ip.String()
+	case atypDomain:
+		n, err := r.ReadByte()
+		if err != nil {
+			return "", err
+		}
+		name := make([]byte, n)
+		if _, err := io.ReadFull(r, name); err != nil {
+			return "", err
+		}
+		host = string(name)
+	default:
+		_ = reply(w, repAtypNotSuppl)
+		return "", errProtocol
+	}
+	port := make([]byte, 2)
+	if _, err := io.ReadFull(r, port); err != nil {
+		return "", err
+	}
+	return net.JoinHostPort(host, strconv.Itoa(int(binary.BigEndian.Uint16(port)))), nil
+}
+
+// reply writes a reply with code and an unspecified bound address.
+func reply(w io.Writer, code byte) error {
+	_, err := w.Write([]byte{version, code, 0, atypIPv4, 0, 0, 0, 0, 0, 0})
+	return err
+}
+
+// replyFor maps an HTTP status to a reply code.
+func replyFor(status int) byte {
+	switch status {
+	case http.StatusOK:
+		return repSucceeded
+	case http.StatusForbidden, http.StatusMethodNotAllowed:
+		return repNotAllowed
+	case http.StatusBadGateway:
+		return repUnreachable
+	case http.StatusGatewayTimeout:
+		return repTTLExpired
+	default:
+		return repFailure
+	}
+}
+
+// responseWriter answers the SOCKS client for a handler that writes an HTTP response. A response written before
+// Hijack is a refusal: its status picks the reply and its body is discarded.
+type responseWriter struct {
+	conn     *conn
+	header   http.Header
+	hijacked bool
+}
+
+func (rw *responseWriter) Header() http.Header { return rw.header }
+
+func (rw *responseWriter) WriteHeader(status int) {
+	if rw.replied() || rw.hijacked {
+		return
+	}
+	code := replyFor(status)
+	if code == repSucceeded {
+		code = repFailure
+	}
+	rw.conn.reply(code)
+}
+
+func (rw *responseWriter) Write(p []byte) (int, error) {
+	if !rw.replied() {
+		rw.WriteHeader(http.StatusOK)
+	}
+	return len(p), nil
+}
+
+func (rw *responseWriter) replied() bool {
+	return rw.conn.replied()
+}
+
+func (rw *responseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	if rw.replied() {
+		return nil, nil, errors.New("socks5: hijack after reply")
+	}
+	rw.hijacked = true
+	return rw.conn, bufio.NewReadWriter(bufio.NewReader(rw.conn), bufio.NewWriter(rw.conn)), nil
+}
+
+// conn is the client connection as a hijacking handler sees it. Until the reply is sent, writes are an HTTP
+// response head, which conn turns into the reply; after it, they pass through. Reads drain what the handshake
+// buffered first.
+type conn struct {
+	net.Conn
+	r *bufio.Reader
+
+	mu   sync.Mutex
+	head []byte
+	done bool
+}
+
+func (c *conn) Read(p []byte) (int, error) { return c.r.Read(p) }
+
+func (c *conn) Write(p []byte) (int, error) {
+	c.mu.Lock()
+	if c.done {
+		c.mu.Unlock()
+		return c.Conn.Write(p)
+	}
+	c.head = append(c.head, p...)
+	end := bytes.Index(c.head, []byte("\r\n\r\n"))
+	if end < 0 {
+		c.mu.Unlock()
+		return len(p), nil
+	}
+	rest := c.head[end+4:]
+	code := replyFor(statusOf(c.head[:end]))
+	c.head = nil
+	c.mu.Unlock()
+
+	if err := c.sendReply(code); err != nil {
+		return 0, err
+	}
+	if code != repSucceeded {
+		return 0, errors.New("socks5: handler refused the connection")
+	}
+	if len(rest) > 0 {
+		if _, err := c.Conn.Write(rest); err != nil {
+			return 0, err
+		}
+	}
+	return len(p), nil
+}
+
+// ReadFrom copies through Write, so that a bufio.Writer over conn passes data on as it arrives rather than
+// holding it until its buffer fills.
+func (c *conn) ReadFrom(r io.Reader) (int64, error) {
+	return io.Copy(struct{ io.Writer }{c}, r)
+}
+
+func (c *conn) reply(code byte) {
+	_ = c.sendReply(code)
+}
+
+func (c *conn) sendReply(code byte) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.done {
+		return nil
+	}
+	c.done = true
+	return reply(c.Conn, code)
+}
+
+func (c *conn) replied() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.done
+}
+
+// statusOf returns the status code of an HTTP response head, or 0 where the head does not parse.
+func statusOf(head []byte) int {
+	line, _, _ := strings.Cut(string(head), "\r\n")
+	_, rest, ok := strings.Cut(line, " ")
+	if !ok {
+		return 0
+	}
+	code, _, _ := strings.Cut(rest, " ")
+	status, err := strconv.Atoi(code)
+	if err != nil {
+		return 0
+	}
+	return status
+}

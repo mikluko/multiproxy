@@ -18,6 +18,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `-set-header` and `-del-header` set and strip headers on plain-HTTP and MITM requests to matching hosts.
 - The `headers` middleware package rewrites request headers per host pattern.
 - `router.MatchHost` matches a hostname against a host pattern.
+- `-socks` opens a SOCKS5 listener routed by the same `-mitm` and `-tunnel` rules as `CONNECT` requests.
+- The `socks5` package serves SOCKS5 connections as `CONNECT` requests to an `http.Handler`.
 
 ### Changed
 
