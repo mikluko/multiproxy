@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"context"
 	"crypto/tls"
-	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
@@ -75,23 +74,11 @@ func (s *MITMHandler) ServeHTTP(rw http.ResponseWriter, rq *http.Request) {
 		return
 	}
 
-	hj, ok := rw.(http.Hijacker)
-	if !ok {
+	accept := connectAcceptor(rw)
+	if accept == nil {
 		s.httpError(rw, http.StatusInternalServerError)
-		panic("underlying http.ResponseWriter MUST implement http.Hijacker")
-		return
+		panic("underlying http.ResponseWriter MUST implement http.Hijacker or ConnectAcceptor")
 	}
-
-	conn, bufrw, err := hj.Hijack()
-	if err != nil {
-		s.httpError(rw, http.StatusInternalServerError)
-		log.Warn(rq, "failed to hijack client connection", "error", err)
-		return
-	}
-	defer conn.Close()
-
-	_, _ = fmt.Fprintf(bufrw, "HTTP/1.1 200 OK\r\n\r\n")
-	_ = bufrw.Flush()
 
 	cert, err := s.certForRequest(rq)
 	if err != nil {
@@ -99,6 +86,14 @@ func (s *MITMHandler) ServeHTTP(rw http.ResponseWriter, rq *http.Request) {
 		log.Warn(rq, "failed to issue certificate", "error", err)
 		return
 	}
+
+	conn, bufrw, err := accept()
+	if err != nil {
+		s.httpError(rw, http.StatusInternalServerError)
+		log.Warn(rq, "failed to accept client connection", "error", err)
+		return
+	}
+	defer conn.Close()
 
 	client := &mitmCounterConn{Conn: newBufferedConn(conn, bufrw.Reader)}
 	defer func() {
